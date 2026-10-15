@@ -1,1 +1,137 @@
-<!doctype html><title>MacTracker</title><h1>MacTracker</h1>
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>MacTracker</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 1.5rem; color: #222; }
+  .banner { background: #fde2e1; border: 1px solid #e0a3a0; padding: .4rem .6rem; margin: .3rem 0; }
+  #sources { color: #666; }
+  section { border-left: 6px solid var(--c); padding-left: .8rem; margin: 1.2rem 0; }
+  h2 { color: var(--c); margin: 0 0 .2rem; font-size: 1.1rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .15rem .3rem; border-bottom: 1px solid #eee; }
+  td input { width: 100%; box-sizing: border-box; font: inherit; }
+  td input[type=number] { width: 5em; }
+  td input[type=checkbox] { width: auto; }
+  tr.overdue { background: #fbd5d5; }
+  tr.upcoming { background: #fff3c4; }
+  tr.missing { opacity: .55; }
+  .src { color: #888; font-size: .85em; }
+</style>
+<h1>MacTracker</h1>
+<div id="banners"></div>
+<p id="sources"></p>
+<p>
+  <label>Course <select id="course"><option value="">All</option></select></label>
+  <label>Status <select id="status">
+    <option value="">All</option><option value="open">Not done</option><option value="done">Done</option>
+    <option value="overdue">Overdue</option><option value="upcoming">Upcoming</option>
+  </select></label>
+  <label>Upcoming window (days) <input id="days" type="number" min="1" style="width:4em"></label>
+</p>
+<main id="list"></main>
+<script>
+'use strict';
+const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'other'];
+const $ = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+const days = () => Number(localStorage.getItem('upcomingDays')) || 7; // AC41/AC42/AC51: browser only
+let data = { items: [], courses: {} };
+let status = {};
+
+const dueMs = (i) => (i.due ? new Date(i.due).getTime() : Infinity);
+const overdue = (i) => !i.done && dueMs(i) < Date.now();
+const upcoming = (i) => !i.done && dueMs(i) >= Date.now() && dueMs(i) <= Date.now() + days() * 864e5;
+const localInput = (iso) => { // ISO -> value for <input type=datetime-local>
+  if (!iso) return '';
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+};
+
+async function load() {
+  [data, status] = await Promise.all([
+    fetch('/api/items').then((r) => r.json()),
+    fetch('/api/status').then((r) => r.json()),
+  ]);
+  render();
+}
+
+const raw = (input) => (input.type === 'checkbox' ? input.checked : input.value);
+const parsed = (input) => (input.type === 'checkbox' ? input.checked
+  : input.type === 'number' ? (input.value === '' ? null : Number(input.value))
+  : input.type === 'datetime-local' ? (input.value ? new Date(input.value).toISOString() : null)
+  : input.value);
+
+// AC31: send only the fields the user changed, then reload.
+async function save(item, inputs, orig) {
+  const fields = {};
+  for (const [k, input] of Object.entries(inputs)) if (raw(input) !== orig[k]) fields[k] = parsed(input);
+  if (!Object.keys(fields).length) return;
+  const r = await fetch(`/api/items/${item.id}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields),
+  });
+  if (!r.ok) alert(`Save failed: ${r.status}`);
+  load();
+}
+
+function row(item) {
+  const inputs = {
+    done: $('input', { type: 'checkbox', checked: !!item.done }),
+    title: $('input', { value: item.title ?? '' }),
+    kind: $('select', {}, ...KINDS.map((k) => $('option', { value: k, textContent: k, selected: k === item.kind }))),
+    due: $('input', { type: 'datetime-local', value: localInput(item.due) }),
+    weight: $('input', { type: 'number', step: 'any', value: item.weight ?? '' }),
+    mark: $('input', { type: 'number', step: 'any', value: item.mark ?? '' }),
+    out_of: $('input', { type: 'number', step: 'any', value: item.out_of ?? '' }),
+  };
+  const orig = Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, raw(i)]));
+  const tr = $('tr', {}, ...Object.values(inputs).map((i) => $('td', {}, i)),
+    $('td', { textContent: item.progress ?? '' }), // AC59: as-is
+    $('td', { className: 'src', textContent: item.source + (item.missing ? ' · missing from source' : '') }),
+    $('td', {}, $('button', { textContent: 'Save', onclick: () => save(item, inputs, orig) })));
+  tr.classList.toggle('overdue', overdue(item));
+  tr.classList.toggle('upcoming', upcoming(item));
+  tr.classList.toggle('missing', !!item.missing);
+  return tr;
+}
+
+function render() {
+  // AC30: one banner per source that needs attention; the other sources still render below.
+  document.getElementById('banners').replaceChildren(...Object.entries(status)
+    .filter(([, s]) => s.status !== 'ok')
+    .map(([src, s]) => $('div', { className: 'banner',
+      textContent: s.status === 'login needed' ? `${src}: login needed — sign in, then sync again`
+        : `${src}: ${s.status}${s.error ? ` — ${s.error}` : ''}` })));
+  document.getElementById('sources').textContent = Object.entries(status)
+    .map(([src, s]) => `${src}: ${s.status}, synced ${new Date(s.synced_at).toLocaleString()}`).join(' · ');
+
+  const courses = [...new Set(data.items.map((i) => i.course ?? '(no course)'))].sort();
+  const pick = document.getElementById('course');
+  const chosen = pick.value;
+  pick.replaceChildren($('option', { value: '', textContent: 'All' }),
+    ...courses.map((c) => $('option', { value: c, textContent: c, selected: c === chosen })));
+  const want = document.getElementById('status').value;
+  const keep = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue, upcoming }[want];
+
+  document.getElementById('list').replaceChildren(...courses.filter((c) => !chosen || c === chosen).map((c) => {
+    const color = `hsl(${(courses.indexOf(c) * 137) % 360} 55% 38%)`; // AC26: page-derived course color
+    const g = data.courses[c] || { grade: null, graded_pct: 0 };
+    const summary = `${g.grade == null ? '—' : `${g.grade.toFixed(1)}%`} · ${(g.graded_pct || 0).toFixed(0)}% graded`
+      + (g.approximate ? ' · approximate' : '');
+    const rows = data.items.filter((i) => (i.course ?? '(no course)') === c && keep(i)).sort((a, b) => dueMs(a) - dueMs(b));
+    const head = $('tr', {}, ...['Done', 'Title', 'Kind', 'Due', 'Weight', 'Mark', 'Out of', 'Progress', 'Source', '']
+      .map((h) => $('th', { textContent: h })));
+    const s = $('section', {}, $('h2', { textContent: `${c} — ${summary}` }),
+      $('table', {}, $('thead', {}, head), $('tbody', {}, ...rows.map(row))));
+    s.style.setProperty('--c', color);
+    return s;
+  }));
+}
+
+const daysInput = document.getElementById('days');
+daysInput.value = days();
+daysInput.addEventListener('change', () => { localStorage.setItem('upcomingDays', daysInput.value); render(); });
+document.getElementById('course').addEventListener('change', render);
+document.getElementById('status').addEventListener('change', render);
+load();
+</script>
+</html>

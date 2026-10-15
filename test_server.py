@@ -1083,6 +1083,30 @@ def test_sync_logs_rejected_posts():
     assert re.search(r"console\.(error|warn)", post), "rejected server post is not logged"
 
 
+# ---- Step 11: index.html (static; rendering is checked manually in Zen) -----------
+
+# AC2/AC26-31/AC35/AC41/AC42/AC51/AC83 — what can be proven without a browser
+def test_index_static():
+    html = (ROOT / "index.html").read_text()
+    assert "localStorage" in html, "upcoming window not kept in localStorage (AC42/AC51)"
+    assert "/api/items" in html and "/api/status" in html, "page does not read /api/items and /api/status"
+    calls = fetch_calls(html)
+    assert calls, "page makes no fetch"
+    for a in calls:
+        url = re.match(r"\(\s*([`'\"])(.*?)\1", a)
+        assert url and url.group(2).startswith(("/api/items", "/api/status")), f"unexpected request: fetch{a[:80]}"
+        assert "localStorage" not in a and not re.search(r"upcoming|window", a, re.I), f"window sent to server: {a[:120]}"
+    edits = [a for a in calls if "/api/items/" in a]
+    assert edits, "no inline-edit POST to /api/items/<id> (AC31)"
+    for a in edits:
+        assert re.search(r"method\s*:\s*['\"]POST['\"]", a) and "application/json" in a, f"edit POST not JSON: {a[:160]}"
+    assert not re.search(r"x-token|token\.txt", html, re.I), "page references the ingest token (AC35: only the extension holds it)"
+    assert re.search(r"localStorage\.getItem\([^)]*\)\)*\s*(?:\|\||\?\?)\s*['\"]?7\b", html), "upcoming window does not default to 7 days (AC41)"
+    assert "login needed" in html, "no login-needed banner text (AC30)"
+    assert "—" in html or "&mdash;" in html, "no — for an ungraded course (AC83)"
+    assert not re.search(r"""(?:src|href)\s*=\s*['"]?(?:https?:)?//|@import""", html, re.I), "external resource (page must work offline)"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:
