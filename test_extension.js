@@ -115,16 +115,218 @@ test('AC77 an unmatched "Test #N Mark:" creates a new test item with no due', ()
   assert.equal(new Set(list.map((i) => i.source_id)).size, list.length, 'new item reuses a source_id');
 });
 
+// ---- Simple Syllabus (AC54, AC55 client side) --------------------------------------
+
+test('AC55 ssCategories: % rows become {name, weights:[raw strings]}; other rows dropped', () => {
+  const rows = [
+    ['Component', 'Scheme A', 'Scheme B'],
+    ['Term Test 1', '10%', '15%'],
+    ['Final Exam', '40-55%**', '45%'],
+    ['Notes', 'see the policy below'],
+  ];
+  assert.deepEqual(P.ssCategories(rows), [
+    { name: 'Term Test 1', weights: ['10%', '15%'] },
+    { name: 'Final Exam', weights: ['40-55%**', '45%'] },
+  ]);
+});
+
+test('AC54 ssCode: doc code from the sso-redirect URL, "/doc/" stripped', () => {
+  const base = 'https://mcmaster.simplesyllabusca.com/en-US/sso-redirect?doc_url=';
+  assert.equal(P.ssCode(base + '/doc/abc123XYZ'), 'abc123XYZ');
+  assert.equal(P.ssCode(base + '%2Fdoc%2Fq9w8e7'), 'q9w8e7');
+  assert.ok(!P.ssCode('https://mcmaster.simplesyllabusca.com/ui/lti-login'), 'code from a URL without doc_url');
+});
+
+test('AC54 toolLaunchPath: escaped toolLaunch path found in componentLaunch HTML, &amp; unescaped', () => {
+  const html = '<html><script>var x = "/d2l/home"; launch(\'/d2l/le/lti/123/toolLaunch/45/678?resourceCode=MCM-SS-1&amp;ou=123\');</script></html>';
+  assert.equal(P.toolLaunchPath(html), '/d2l/le/lti/123/toolLaunch/45/678?resourceCode=MCM-SS-1&ou=123');
+  assert.ok(!P.toolLaunchPath('<html><body>no launch here</body></html>'));
+});
+
+// ---- Avenue (AC23, AC52, AC65-AC68, AC72, AC79, AC81) ------------------------------
+
+const AVENUE = {
+  folders: [
+    { Id: 11, Name: 'Assignment 1', DueDate: '2026-10-01T03:59:00.000Z', GradeItemId: 101, Assessment: { ScoreDenominator: 20 } },
+    { Id: 12, Name: 'Assignment 2', DueDate: '2026-10-15T03:59:00.000Z', GradeItemId: 102, Assessment: { ScoreDenominator: 20 } },
+    { Id: 13, Name: 'Lab Report', DueDate: null, GradeItemId: null, Assessment: { ScoreDenominator: 10 } },
+  ],
+  subs: {
+    11: [{ Status: 2, Submissions: [{ SubmissionDate: '2026-09-30T20:00:00.000Z' }], Feedback: { Score: 18, IsGraded: true }, CompletionDate: null }],
+    12: [{ Status: 1, Submissions: [{ SubmissionDate: '2026-10-14T20:00:00.000Z' }], Feedback: { Score: 5, IsGraded: false }, CompletionDate: null }],
+    13: [{ Status: 0, Submissions: [], Feedback: null, CompletionDate: null }],
+  },
+  quizzes: [
+    { QuizId: 501, Name: 'Quiz 1', DueDate: '2026-10-05T03:59:00.000Z', GradeItemId: 201 },
+    { QuizId: 502, Name: 'Quiz 2 - Kinetics', DueDate: '2026-10-12T03:59:00.000Z', GradeItemId: null },
+    { QuizId: 504, Name: 'Quiz 4', DueDate: null, GradeItemId: 204 },
+  ],
+  grades: [
+    { Id: 101, Name: 'Assignment 1', MaxPoints: 20, Weight: 5, GradeType: 'Numeric' },
+    { Id: 102, Name: 'Assignment 2', MaxPoints: 20, Weight: 5, GradeType: 'Numeric' },
+    { Id: 201, Name: 'Quiz 1', MaxPoints: 10, Weight: 2, GradeType: 'Numeric' },
+    { Id: 202, Name: 'Quiz 2: Kinetics', MaxPoints: 10, Weight: 2, GradeType: 'Numeric' },
+    { Id: 204, Name: 'Quiz 4 (practice)', MaxPoints: 10, Weight: 0, GradeType: 'Numeric' },
+    { Id: 206, Name: 'Quiz 4', MaxPoints: 10, Weight: 3, GradeType: 'Numeric' },
+    { Id: 301, Name: 'Participation Bonus', MaxPoints: 5, Weight: 1, GradeType: 'Numeric' },
+    { Id: 302, Name: 'Midterm', MaxPoints: 50, Weight: 25, GradeType: 'Numeric' },
+  ],
+  values: [
+    { GradeObjectIdentifier: '101', GradeObjectName: 'Assignment 1', GradeObjectTypeName: 'Numeric', PointsNumerator: 17, PointsDenominator: 20 },
+    { GradeObjectIdentifier: '102', GradeObjectName: 'Assignment 2', GradeObjectTypeName: 'Numeric', PointsNumerator: 15, PointsDenominator: 20 },
+    { GradeObjectIdentifier: '201', GradeObjectName: 'Quiz 1', GradeObjectTypeName: 'Numeric', PointsNumerator: 8, PointsDenominator: 10 },
+    { GradeObjectIdentifier: '202', GradeObjectName: 'Quiz 2: Kinetics', GradeObjectTypeName: 'Numeric', PointsNumerator: 9, PointsDenominator: 10 },
+    { GradeObjectIdentifier: '206', GradeObjectName: 'Quiz 4', GradeObjectTypeName: 'Numeric', PointsNumerator: 7, PointsDenominator: 10 },
+    { GradeObjectIdentifier: '302', GradeObjectName: 'Midterm', GradeObjectTypeName: 'Numeric', PointsNumerator: 41, PointsDenominator: 50 },
+    { GradeObjectIdentifier: '9001', GradeObjectName: 'Online Homework', GradeObjectTypeName: 'Category', PointsNumerator: 45, PointsDenominator: 50 },
+  ],
+};
+const avenue = () => P.avenueItems(JSON.parse(JSON.stringify(AVENUE)));
+const bySid = (list) => Object.fromEntries(list.map((i) => [i.source_id, i]));
+
+test('AC23 dropbox folders: dropbox:<Id>, title, due, out_of, done from submissions, graded mark', () => {
+  const a = bySid(avenue().items);
+  const d11 = a['dropbox:11'];
+  assert.ok(d11, `no dropbox:11 in ${Object.keys(a)}`);
+  assert.deepEqual([d11.title, d11.due, d11.out_of, d11.done, d11.mark], ['Assignment 1', '2026-10-01T03:59:00.000Z', 20, true, 18]);
+  assert.equal(a['dropbox:12'].done, true, 'submitted but ungraded folder not done');
+  assert.ok(!a['dropbox:13'].done, 'folder with no submissions is done');
+  assert.ok(a['dropbox:13'].mark == null, `ungraded folder has mark ${a['dropbox:13'].mark}`);
+});
+
+test('AC66 + AC65 gradebook items: grade:<Id>, title = Name, out_of = MaxPoints, Numeric value gives mark', () => {
+  const a = bySid(avenue().items);
+  assert.ok(a['grade:301'] && a['grade:302'], `missing grade:301/302 in ${Object.keys(a)}`);
+  assert.deepEqual([a['grade:301'].title, a['grade:301'].out_of], ['Participation Bonus', 5]);
+  assert.ok(a['grade:301'].mark == null, 'mark without a grade value');
+  assert.deepEqual([a['grade:302'].title, a['grade:302'].mark, a['grade:302'].out_of], ['Midterm', 41, 50]);
+});
+
+test('AC67 gradebook item with a folder GradeItemId joins the dropbox row; its mark fills only an empty mark', () => {
+  const a = bySid(avenue().items);
+  assert.ok(!a['grade:101'] && !a['grade:102'], 'gradebook item emitted beside its dropbox row');
+  assert.equal(a['dropbox:11'].mark, 18, 'gradebook mark replaced the dropbox feedback mark');
+  assert.equal(a['dropbox:12'].mark, 15, 'empty dropbox mark not filled from the gradebook');
+});
+
+test('AC68 quizzes: quiz:<QuizId>, title = Name, due = DueDate', () => {
+  const a = bySid(avenue().items);
+  assert.ok(a['quiz:501'] && a['quiz:502'] && a['quiz:504'], `quiz rows missing in ${Object.keys(a)}`);
+  assert.deepEqual([a['quiz:501'].title, a['quiz:501'].due], ['Quiz 1', '2026-10-05T03:59:00.000Z']);
+  assert.deepEqual([a['quiz:502'].title, a['quiz:502'].due], ['Quiz 2 - Kinetics', '2026-10-12T03:59:00.000Z']);
+});
+
+test('AC79 + AC81 quiz <-> gradebook by GradeItemId, title fallback only when null; merged, mark fills, done follows mark', () => {
+  const a = bySid(avenue().items);
+  for (const id of ['grade:201', 'grade:202', 'grade:204']) assert.ok(!a[id], `${id} emitted beside its quiz row`);
+  assert.deepEqual([a['quiz:501'].mark, a['quiz:501'].out_of, a['quiz:501'].done], [8, 10, true], 'linked by GradeItemId');
+  assert.deepEqual([a['quiz:502'].mark, a['quiz:502'].out_of, a['quiz:502'].done], [9, 10, true], 'linked by normalized title');
+  assert.ok(!a['quiz:504'].done && a['quiz:504'].mark == null, 'quiz 4 links to ungraded 204, not same-titled 206');
+  assert.deepEqual([a['grade:206'] && a['grade:206'].mark], [7], 'unmatched gradebook item 206 not emitted per AC66');
+});
+
+test('AC72 + AC75 Category grade value: no item, recorded as categoryMarks (percent)', () => {
+  const r = avenue();
+  assert.ok(!r.items.some((i) => /online homework/i.test(i.title) || /9001/.test(i.source_id)), 'item made for a Category value');
+  assert.deepEqual(r.categoryMarks, [{ name: 'Online Homework', value: 90 }]);
+});
+
+test('AC52 Avenue items never carry the gradebook Weight', () => {
+  for (const i of avenue().items) assert.ok(i.weight === undefined && i.Weight === undefined, `weight on ${i.source_id}`);
+});
+
+// ---- Crowdmark (AC24) ----------------------------------------------------------------
+
+const CM_ASSIGNMENTS = {
+  data: [
+    { id: 'a1', type: 'assignments', attributes: { due: '2026-10-09T03:59:00Z', 'submitted-at': '2026-10-08T22:00:00Z', 'marks-sent-at': '2026-10-12T15:00:00Z', 'normalized-points': 0.79 },
+      relationships: { 'exam-master': { data: { id: 'em1', type: 'exam-masters' } } } },
+    { id: 'a2', type: 'assignments', attributes: { due: '2026-10-16T03:59:00Z', 'submitted-at': '2026-10-15T22:00:00Z', 'marks-sent-at': null, 'normalized-points': null },
+      relationships: { 'exam-master': { data: { id: 'em2', type: 'exam-masters' } } } },
+    { id: 'a3', type: 'assignments', attributes: { due: '2026-10-23T03:59:00Z', 'submitted-at': null, 'marks-sent-at': null, 'normalized-points': null },
+      relationships: { 'exam-master': { data: { id: 'em3', type: 'exam-masters' } } } },
+  ],
+  included: [
+    { id: 'em1', type: 'exam-masters', attributes: { title: 'Assignment 3', 'total-points': 24 } },
+    { id: 'em2', type: 'exam-masters', attributes: { title: 'Assignment 4', 'total-points': 30 } },
+    { id: 'em3', type: 'exam-masters', attributes: { title: 'Assignment 5', 'total-points': 30 } },
+  ],
+};
+const CM_RESULTS = {
+  a1: { data: { id: 'a1', type: 'results', attributes: { marked: true, total: 20, 'total-after-penalty': 19 } },
+        included: [{ id: 'em1', type: 'exam-masters', attributes: { title: 'Assignment 3', 'total-points': 24 } }] },
+};
+
+test('AC24 Crowdmark: title from exam-master, due, done = submitted-at, mark/out_of from results', () => {
+  const list = P.crowdmarkItems(CM_ASSIGNMENTS, CM_RESULTS);
+  const t = byTitle(list);
+  assert.deepEqual(list.map((i) => i.title), ['Assignment 3', 'Assignment 4', 'Assignment 5']);
+  assert.deepEqual([t['Assignment 3'].due, t['Assignment 3'].done, t['Assignment 3'].mark, t['Assignment 3'].out_of],
+    ['2026-10-09T03:59:00Z', true, 19, 24]);
+  assert.equal(t['Assignment 4'].done, true);
+  assert.ok(t['Assignment 4'].mark == null, 'mark without marks-sent-at');
+  assert.ok(!t['Assignment 5'].done && t['Assignment 5'].mark == null);
+  assert.equal(new Set(list.map((i) => i.source_id)).size, 3, 'source_id not unique');
+});
+
+// ---- syncAll (AC20, AC21) --------------------------------------------------------------
+
+async function runSync(fetchers) {
+  const posted = [];
+  await P.syncAll(fetchers, async (body) => { posted.push(body); });
+  return Object.fromEntries(posted.map((b) => [b.source, b]));
+}
+
+test('AC20 one fetcher failing: the others still post their items; the failing source posts error + message', async () => {
+  const got = await runSync({
+    avenue: async () => ({ items: [{ source_id: 'dropbox:1', title: 'A1' }], categoryMarks: [] }),
+    crowdmark: () => { throw new Error('boom: bad JSON'); },
+    childsmath: async () => ({ items: [{ source_id: 'c1', title: 'Assignment #1' }] }),
+  });
+  assert.deepEqual(Object.keys(got).sort(), ['avenue', 'childsmath', 'crowdmark']);
+  assert.equal(got.avenue.status, 'ok');
+  assert.deepEqual(got.avenue.items, [{ source_id: 'dropbox:1', title: 'A1' }]);
+  assert.equal(got.childsmath.status, 'ok');
+  assert.equal(got.childsmath.items.length, 1);
+  assert.equal(got.crowdmark.status, 'error');
+  assert.match(got.crowdmark.error, /boom: bad JSON/);
+  assert.deepEqual(got.crowdmark.items, []);
+});
+
+test('AC21 a fetcher throwing LoginNeeded reports "login needed"', async () => {
+  const got = await runSync({
+    avenue: async () => { throw new P.LoginNeeded('avenue'); },
+    childsmath: async () => ({ items: [] }),
+  });
+  assert.equal(got.avenue.status, 'login needed');
+  assert.deepEqual(got.avenue.items, []);
+  assert.equal(got.childsmath.status, 'ok');
+});
+
+// ---- AC61 / AC75: no MyLab or Pearson code ---------------------------------------------
+
+test('AC61 + AC75 extension source has no MyLab/Pearson fetcher', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, 'extension');
+  for (const f of fs.readdirSync(dir)) {
+    const text = fs.readFileSync(path.join(dir, f), 'utf8');
+    assert.ok(!/mylab|pearson/i.test(text), `MyLab/Pearson in extension/${f}`);
+  }
+});
+
 // ---------------------------------------------------------------------------------
 
-let failed = 0;
-for (const [name, fn] of tests) {
-  try {
-    fn();
-    console.log(`ok   ${name}`);
-  } catch (e) {
-    failed++;
-    console.log(`FAIL ${name}: ${e.message}`);
+(async () => {
+  let failed = 0;
+  for (const [name, fn] of tests) {
+    try {
+      await fn();
+      console.log(`ok   ${name}`);
+    } catch (e) {
+      failed++;
+      console.log(`FAIL ${name}: ${e.message}`);
+    }
   }
-}
-process.exit(failed ? 1 : 0);
+  process.exit(failed ? 1 : 0);
+})();
