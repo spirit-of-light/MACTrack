@@ -37,6 +37,12 @@ class Running:
             (self.dir / "token.txt").write_text(token)
 
     def __enter__(self):
+        import socket
+
+        with socket.socket() as probe:
+            if probe.connect_ex(("127.0.0.1", 8000)) == 0:
+                shutil.rmtree(self.dir, ignore_errors=True)
+                raise AssertionError("port 8000 already in use (another server.py running?) - stop it and rerun")
         self.proc = subprocess.Popen(
             [sys.executable, "server.py"], cwd=self.dir,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1165,6 +1171,131 @@ def test_index_static():
     assert "login needed" in html, "no login-needed banner text (AC30)"
     assert "—" in html or "&mdash;" in html, "no — for an ungraded course (AC83)"
     assert not re.search(r"""(?:src|href)\s*=\s*['"]?(?:https?:)?//|@import""", html, re.I), "external resource (page must work offline)"
+
+
+# ---- Live-run fixes (bugs 3-7; ACs from AC85) ------------------------------------
+
+# Bug 3 — any item with a mark is done, whatever done the source sent
+def test_marked_item_done():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("m1", mark=5, out_of=10, done=False), item("m2", mark=0, out_of=5),
+                                item("u1", done=False)])
+        a = by_sid(get_items(s), "avenue")
+        assert bool(a["m1"]["done"]) is True, a["m1"]
+        assert bool(a["m2"]["done"]) is True, a["m2"]
+        assert not a["u1"]["done"], a["u1"]
+
+
+LAB = "Lab 1: Excel Exercises"
+
+
+# Bug 4 — one due missing: same course + title still merges; Avenue kept, due filled from the other
+def test_dedup_one_due_missing():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [{"course": "MATH_1ZA3_x_2269", "source_id": "grade:9", "title": LAB, "mark": 1, "out_of": 1}])
+        ingest_ok(s, "crowdmark", [{"course": "MATH 1ZA3 Fall 2026", "source_id": "cm-9", "title": LAB, "due": "2026-09-20T03:59:00Z"}])
+        rows = in_course(get_items(s), "MATH 1ZA3")
+        assert len(rows) == 1, rows
+        assert (rows[0]["source"], rows[0]["due"]) == ("avenue", "2026-09-20T03:59:00Z"), rows[0]
+
+
+# Bug 4 — both dues missing, different sources: merges
+def test_dedup_both_dues_missing():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [{"course": "MATH 1ZA3", "source_id": "grade:9", "title": LAB}])
+        ingest_ok(s, "crowdmark", [{"course": "MATH 1ZA3", "source_id": "cm-9", "title": LAB}])
+        rows = in_course(get_items(s), "MATH 1ZA3")
+        assert len(rows) == 1 and rows[0]["source"] == "avenue", rows
+
+
+# Bug 4 — rows from the same source never merge
+def test_dedup_same_source_never():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [{"course": "MATH 1ZA3", "source_id": "grade:9", "title": LAB},
+                                {"course": "MATH 1ZA3", "source_id": "dropbox:9", "title": LAB},
+                                {"course": "MATH 1ZA3", "source_id": "quiz:9", "title": LAB, "due": "2026-09-20T03:59:00Z"},
+                                {"course": "MATH 1ZA3", "source_id": "quiz:10", "title": LAB, "due": "2026-09-20T05:59:00Z"}])
+        assert len(in_course(get_items(s), "MATH 1ZA3")) == 4
+
+
+# AC88 — three matching rows from three sources merge into one Avenue row, filled from the others
+def test_dedup_three_sources():
+    with InProcess() as s:
+        ingest_ok(s, "childsmath", [{"course": "Math 1ZA3 F26", "source_id": "Math 1ZA3 F26:" + LAB, "title": LAB, "progress": "3/8"}])
+        ingest_ok(s, "crowdmark", [{"course": "MATH 1ZA3 Fall 2026", "source_id": "cm-9", "title": LAB, "url": "https://app.crowdmark.com/x"}])
+        ingest_ok(s, "avenue", [{"course": "MATH_1ZA3_x_2269", "source_id": "grade:9", "title": LAB, "mark": 1, "out_of": 1}])
+        rows = in_course(get_items(s), "MATH 1ZA3")
+        assert len(rows) == 1, rows
+        r = rows[0]
+        assert (r["source"], r["url"], r["progress"], r["mark"]) == ("avenue", "https://app.crowdmark.com/x", "3/8", 1), r
+
+
+# AC88 — priority crowdmark > childsmath when there is no Avenue row; fill applies to that pair too
+def test_dedup_priority_crowdmark_over_childsmath():
+    with InProcess() as s:
+        ingest_ok(s, "childsmath", [{"course": "Math 1ZA3 F26", "source_id": "Math 1ZA3 F26:" + LAB, "title": LAB,
+                                     "due": "2026-09-20T03:59:00Z", "progress": "8/8"}])
+        ingest_ok(s, "crowdmark", [{"course": "MATH 1ZA3 Fall 2026", "source_id": "cm-9", "title": LAB, "mark": 7, "out_of": 8}])
+        rows = in_course(get_items(s), "MATH 1ZA3")
+        assert len(rows) == 1, rows
+        r = rows[0]
+        assert (r["source"], r["due"], r["progress"], r["mark"]) == ("crowdmark", "2026-09-20T03:59:00Z", "8/8", 7), r
+
+
+# AC90 — a "practice" outline category becomes a placeholder (no kind bucket); practice items still get no weight
+def test_practice_category_placeholder():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "95%"), ("Practice Quizzes", "5%")))
+        ingest_ok(s, "avenue", [item("a1", title="Assignment 1", mark=6, out_of=10),
+                                item("p1", title="Practice Quiz 1", mark=10, out_of=10)])
+        items = in_course(get_items(s), "MATH 1ZA3")
+        ph = [i for i in items if i["title"] == "Practice Quizzes"]
+        assert len(ph) == 1 and ph[0]["source"] == "outline", ph
+        p1 = by_sid(items, "avenue")["p1"]
+        assert p1["weight"] is None, p1
+        assert sum(course_weights(s, "MATH 1ZA3")["schemes"][0].values()) == 100
+        c = get_courses(s)["MATH 1ZA3"]
+        assert near(c["grade"], 60), c  # only Assignment 1 counts: 6/10
+
+
+# Bug 5 — "practice" is checked before every other keyword
+def test_kind_practice():
+    import server
+
+    got = [server.kind(t) for t in ("Practice Test 1", "Practice Exam", "Unit 3 - Atomic Structure - Practice Problems")]
+    assert got == ["practice"] * 3, got
+
+
+# Bug 6 — practice items get no weight and do not count, even beside a "Tests" category
+def test_practice_no_weight():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Tests", "50%"), ("Assignments", "50%")))
+        ingest_ok(s, "avenue", [item("t1", title="Test 1", mark=40, out_of=50),
+                                item("p1", title="Practice Test 1", mark=10, out_of=10),
+                                item("a1", title="Assignment 1", mark=6, out_of=10)])
+        a = by_sid(get_items(s), "avenue")
+        assert a["p1"]["kind"] == "practice" and a["p1"]["weight"] is None, a["p1"]
+        assert near(a["t1"]["weight"], 50), a["t1"]
+        c = get_courses(s)["MATH 1ZA3"]
+        assert near(c["grade"], 70) and near(c["graded_pct"], 100), c  # (50*.8 + 50*.6) / 100
+
+
+# Bug 7 — ingest course_info is stored per course and returned as courses[code].info; absent leaves it alone
+def test_course_info_stored():
+    info = [{"name": "Lab Room", "value": "ABB 102"}, {"name": "Test 1 Room", "value": ""}]
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1")], course_info=[{"course": "MATH_1ZA3_x_2269", **i} for i in info])
+        assert get_courses(s)["MATH 1ZA3"]["info"] == info, get_courses(s)["MATH 1ZA3"]
+        ingest_ok(s, "avenue", [item("1")])
+        assert get_courses(s)["MATH 1ZA3"]["info"] == info, "ingest without course_info dropped the info"
+        ingest_ok(s, "avenue", [item("1")], course_info=[{"course": "MATH 1ZA3", "name": "Lab Section", "value": "L07"}])
+        assert get_courses(s)["MATH 1ZA3"]["info"] == [{"name": "Lab Section", "value": "L07"}], "course_info not replaced as a whole"
+
+
+# Bug 7 (page) — the course header renders courses[...].info
+def test_index_course_info():
+    html = (ROOT / "index.html").read_text()
+    assert re.search(r"\.info\b|\[\s*['\"]info['\"]\s*\]", html), "index.html never reads courses[code].info"
 
 
 if __name__ == "__main__":

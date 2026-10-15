@@ -315,6 +315,93 @@ test('AC61 + AC75 extension source has no MyLab/Pearson fetcher', () => {
   }
 });
 
+// ---- Live-run fixes (bugs 1, 2, 3, 7; ACs from AC85) ------------------------------
+
+test('Bug 1 termStart: Avenue Code suffix 2yyT gives the term start (9 Fall Sep 1, 1 Winter Jan 1, 5 Spring May 1)', () => {
+  assert.equal(P.termStart('MATH_1B03_x_2269'), '2026-09-01');
+  assert.equal(P.termStart('CHEM_1A03_abc_2271'), '2027-01-01');
+  assert.equal(P.termStart('PHYSICS_1C03_y_2265'), '2026-05-01');
+  assert.ok(!P.termStart('Sandbox course'), 'term from a code with no term suffix');
+  assert.ok(!P.termStart('SANDBOX_TEST_2263'), 'term from suffix digit 3 (only 1, 5, 9 are terms)');
+  assert.ok(!P.termStart('MATH_1B03'), 'term from a code with no suffix');
+});
+
+test('Bug 1 avenueItems drops items due before the term start; items without a due are kept', () => {
+  const r = P.avenueItems({
+    code: 'MATH_1B03_x_2269',
+    folders: [
+      { Id: 71, Name: 'Old Assignment 1', DueDate: '2024-10-29T03:59:00.000Z', GradeItemId: null, Assessment: { ScoreDenominator: 10 } },
+      { Id: 72, Name: 'Old Assignment 2', DueDate: '2024-12-07T04:59:00.000Z', GradeItemId: null, Assessment: { ScoreDenominator: 10 } },
+      { Id: 73, Name: 'Assignment 1', DueDate: '2026-10-01T03:59:00.000Z', GradeItemId: null, Assessment: { ScoreDenominator: 10 } },
+      { Id: 74, Name: 'Reflection', DueDate: null, GradeItemId: null, Assessment: { ScoreDenominator: 5 } },
+    ],
+    subs: { 71: [], 72: [], 73: [], 74: [] },
+    quizzes: [{ QuizId: 81, Name: 'Old Quiz', DueDate: '2025-03-01T03:59:00.000Z', GradeItemId: null }],
+  });
+  assert.deepEqual(r.items.map((i) => i.source_id).sort(), ['dropbox:73', 'dropbox:74']);
+});
+
+test('AC85 a Code with no _YYYT term suffix skips nothing', () => {
+  const r = P.avenueItems({
+    code: 'SANDBOX_TEST_2263',
+    folders: [{ Id: 75, Name: 'Old Sandbox Task', DueDate: '2019-01-01T00:00:00.000Z', GradeItemId: null, Assessment: { ScoreDenominator: 1 } }],
+    subs: { 75: [] },
+  });
+  assert.deepEqual(r.items.map((i) => i.source_id), ['dropbox:75']);
+});
+
+test('Bug 2 childsmath course label = last course-label line before the first item title', () => {
+  const lines = ['Your Courses:', 'Math 1A03/1ZA3 F26', 'Math 1B03 F26', 'Math 1B03 F26',
+    'Assignment #1', '(Due date: 11:59pm on Tuesday September 22)', '0/8',
+    'Assignment #2', '(Due date: 11:59pm on Tuesday October 6)', '2/8'];
+  const list = P.childsmathItems(lines);
+  assert.deepEqual(list.map((i) => i.title), ['Assignment #1', 'Assignment #2']);
+  for (const i of list) assert.equal(i.course, 'Math 1B03 F26');
+  assert.equal(list[0].due, '2026-09-22T23:59');
+});
+
+test('Bug 2 two childsmath areas with the same titles give distinct source_ids', () => {
+  const area = (label) => P.childsmathItems(['Your Courses:', label, 'Assignment #1', '0/8', 'Assignment #2', '0/8']);
+  const ids = [...area('Math 1B03 F26'), ...area('Math 1ZA3 F26')].map((i) => i.source_id);
+  assert.equal(new Set(ids).size, 4, `source_ids collide: ${ids}`);
+});
+
+test('Bug 3 any Avenue item with a mark is done (gradebook 1/1 and 0/5)', () => {
+  const r = P.avenueItems({
+    grades: [{ Id: 601, Name: 'Lab 1: Excel Exercises', MaxPoints: 1, GradeType: 'Numeric' },
+             { Id: 602, Name: 'Lab 2', MaxPoints: 5, GradeType: 'Numeric' },
+             { Id: 603, Name: 'Lab 3', MaxPoints: 5, GradeType: 'Numeric' }],
+    values: [{ GradeObjectIdentifier: '601', GradeObjectTypeName: 'Numeric', PointsNumerator: 1, PointsDenominator: 1 },
+             { GradeObjectIdentifier: '602', GradeObjectTypeName: 'Numeric', PointsNumerator: 0, PointsDenominator: 5 }],
+  });
+  const a = bySid(r.items);
+  assert.equal(a['grade:601'].done, true, '1/1 not done');
+  assert.equal(a['grade:602'].done, true, '0/5 (a mark of zero) not done');
+  assert.ok(!a['grade:603'].done, 'unmarked item done');
+});
+
+test('Bug 7 Text gradebook items are not items; they come back as courseInfo [{name, value}]', () => {
+  const r = P.avenueItems({
+    grades: [
+      { Id: 701, Name: 'Lab Room', MaxPoints: null, GradeType: 'Text' },
+      { Id: 702, Name: 'Lab Section', MaxPoints: null, GradeType: 'Text' },
+      { Id: 703, Name: 'Lab Bench Number', MaxPoints: null, GradeType: 'Text' },
+      { Id: 704, Name: 'Test 1 Room', MaxPoints: null, GradeType: 'Text' },
+      { Id: 705, Name: 'Lab 1', MaxPoints: 10, GradeType: 'Numeric' },
+    ],
+    values: [
+      { GradeObjectIdentifier: '701', GradeObjectName: 'Lab Room', GradeObjectTypeName: 'Text', DisplayedGrade: 'ABB 102' },
+      { GradeObjectIdentifier: '702', GradeObjectName: 'Lab Section', GradeObjectTypeName: 'Text', DisplayedGrade: 'L07' },
+      { GradeObjectIdentifier: '703', GradeObjectName: 'Lab Bench Number', GradeObjectTypeName: 'Text', DisplayedGrade: '14' },
+    ],
+  });
+  assert.deepEqual(r.items.map((i) => i.source_id), ['grade:705']);
+  assert.deepEqual(r.courseInfo, [
+    { name: 'Lab Room', value: 'ABB 102' }, { name: 'Lab Section', value: 'L07' },
+    { name: 'Lab Bench Number', value: '14' }, { name: 'Test 1 Room', value: '' }]);
+  assert.deepEqual(r.categoryMarks, []);
+});
+
 // ---------------------------------------------------------------------------------
 
 (async () => {

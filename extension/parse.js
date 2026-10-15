@@ -27,7 +27,17 @@ function dueDate(s, term) {
 
 // AC25/AC59/AC60/AC70: student_admin text lines -> items. A block is a title line plus the
 // lines up to the next title.
-function childsmathItems(lines, courseLabel) {
+// AC86: the area's course is the last course-label line ("Math 1B03 F26") before the first item title.
+function childsmathLabel(lines) {
+  let label = null;
+  for (const line of lines.map((l) => l.trim())) {
+    if (TITLE_LINE.test(line)) break;
+    if (/\b[A-Za-z]+\s*\d[A-Za-z0-9]{3}\b.*\b[FWS]\d{2}\b/.test(line)) label = line;
+  }
+  return label;
+}
+
+function childsmathItems(lines, courseLabel = childsmathLabel(lines)) {
   const blocks = [];
   for (const line of lines.map((l) => l.trim())) {
     if (TITLE_LINE.test(line)) blocks.push([line]);
@@ -105,25 +115,38 @@ function toolLaunchPath(html) {
 
 // {folders, subs: {folderId: [entry]}, quizzes, grades, values} -> {items, categoryMarks}.
 // Items carry no course (the caller adds it) and never a weight (AC52).
-function avenueItems({ folders = [], subs = {}, quizzes = [], grades = [], values = [] }) {
+// AC85: Avenue Code suffix _2YYT (T: 9 Fall, 1 Winter, 5 Spring/Summer) -> term start 'YYYY-MM-DD', else null.
+function termStart(code) {
+  const m = /_2(\d{2})([159])$/.exec(code || '');
+  return m ? `20${m[1]}-${{ 9: '09', 1: '01', 5: '05' }[m[2]]}-01` : null;
+}
+
+function avenueItems({ code, folders = [], subs = {}, quizzes = [], grades: allGrades = [], values = [] }) {
   const value = {};
   const categoryMarks = [];
   for (const v of values) {
-    if (v.GradeObjectTypeName === 'Numeric') value[String(v.GradeObjectIdentifier)] = v;
-    else if (v.GradeObjectTypeName === 'Category' && v.PointsDenominator) {
+    if (v.GradeObjectTypeName !== 'Category') value[String(v.GradeObjectIdentifier)] = v;
+    else if (v.PointsDenominator) {
       categoryMarks.push({ name: v.GradeObjectName, value: (v.PointsNumerator / v.PointsDenominator) * 100 });
     }
   }
   const gradeRow = (g) => {
     const v = value[String(g.Id)];
     return { source_id: `grade:${g.Id}`, title: g.Name, mark: v ? v.PointsNumerator : null,
-      out_of: v ? v.PointsDenominator : g.MaxPoints };
+      out_of: v ? v.PointsDenominator : g.MaxPoints, done: !!v && v.PointsNumerator != null };
   };
   const fill = (row, g) => { // AC67/AC81: the gradebook mark fills only an empty mark
     const gr = gradeRow(g);
     if (row.mark == null && gr.mark != null) Object.assign(row, { mark: gr.mark, out_of: gr.out_of });
     if (row.out_of == null) row.out_of = gr.out_of;
   };
+  // AC91: non-Numeric gradebook items (e.g. Text: lab room) are course info, not items.
+  const numeric = (g) => g.GradeType == null || g.GradeType === 'Numeric';
+  const grades = allGrades.filter(numeric);
+  const courseInfo = allGrades.filter((g) => !numeric(g)).map((g) => {
+    const v = value[String(g.Id)];
+    return { name: g.Name, value: (v && v.DisplayedGrade) || '' };
+  });
   const used = new Set();
   const byId = Object.fromEntries(grades.map((g) => [String(g.Id), g]));
 
@@ -136,6 +159,7 @@ function avenueItems({ folders = [], subs = {}, quizzes = [], grades = [], value
       mark: graded ? graded.Feedback.Score : null };
     const g = f.GradeItemId != null && byId[String(f.GradeItemId)];
     if (g) { fill(row, g); used.add(g.Id); }
+    row.done = row.done || row.mark != null; // AC87
     return row;
   });
 
@@ -150,7 +174,10 @@ function avenueItems({ folders = [], subs = {}, quizzes = [], grades = [], value
   }
 
   for (const g of grades) if (!used.has(g.Id)) items.push(gradeRow(g)); // AC66
-  return { items, categoryMarks };
+  // AC85: drop dropbox/quiz rows due before the course's term (gradebook rows have no due).
+  const start = termStart(code);
+  const current = (i) => !start || !i.due || new Date(i.due) >= new Date(`${start}T00:00:00`);
+  return { items: items.filter(current), categoryMarks, courseInfo };
 }
 
 // ---- Crowdmark (AC24) ----
@@ -183,6 +210,7 @@ async function syncAll(fetchers, post) {
       const r = (await run()) || {};
       body = { source, status: 'ok', items: r.items || [] };
       if (r.categoryMarks && r.categoryMarks.length) body.category_marks = r.categoryMarks;
+      if (r.courseInfo && r.courseInfo.length) body.course_info = r.courseInfo;
     } catch (e) {
       body = e instanceof LoginNeeded || (e && e.name === 'LoginNeeded')
         ? { source, status: 'login needed', items: [] }
@@ -193,6 +221,6 @@ async function syncAll(fetchers, post) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { dueDate, childsmathItems, parseMarks, applyMarks, ssCategories, ssCode, toolLaunchPath,
+  module.exports = { dueDate, childsmathLabel, childsmathItems, termStart, parseMarks, applyMarks, ssCategories, ssCode, toolLaunchPath,
     avenueItems, crowdmarkItems, syncAll, LoginNeeded };
 }

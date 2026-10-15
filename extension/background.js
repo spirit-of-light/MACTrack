@@ -108,6 +108,7 @@ async function avenue() {
   const { Courses } = await json(`${AVENUE}/d2l/le/manageCourses/api/mycourses`);
   const items = [];
   const categoryMarks = [];
+  const courseInfo = [];
   for (const c of Courses.filter((x) => x.IsActive)) { // AC53
     const api = `${AVENUE}/d2l/api/le/1.45/${c.OrgUnitId}`;
     const folders = await optional(`${api}/dropbox/folders/`, []);
@@ -121,13 +122,14 @@ async function avenue() {
     }
     const grades = await optional(`${api}/grades/`, []);
     const values = await optional(`${api}/grades/values/myGradeValues/`, []);
-    const r = avenueItems({ folders, subs, quizzes, grades, values });
+    const r = avenueItems({ code: c.Code, folders, subs, quizzes, grades, values });
     items.push(...r.items.map((i) => ({ ...i, course: c.Code })));
     categoryMarks.push(...r.categoryMarks.map((m) => ({ ...m, course: c.Code })));
+    courseInfo.push(...r.courseInfo.map((i) => ({ ...i, course: c.Code })));
     // An outline failure is logged but never costs the course's items.
     await outline(c.OrgUnitId, c.Code).catch((e) => console.error(`MacTracker: outline for ${c.Code}:`, e));
   }
-  return { items, categoryMarks };
+  return { items, categoryMarks, courseInfo };
 }
 
 async function crowdmark() {
@@ -152,9 +154,8 @@ async function childsmath() {
     try {
       const base = `${CHILDSMATH}/childsa/forms/${area}`;
       const admin = textLines(await (await get(`${base}/student_admin.php`)).text());
-      const m = admin.map((l) => /([A-Za-z]+)\s*(\d[A-Za-z0-9]{3})\b.*?\b([FWS]\d{2})\b/.exec(l)).find(Boolean);
-      if (!m) throw new Error('no course label with a term on student_admin.php');
-      const label = `${m[1]} ${m[2]} ${m[3]}`;
+      const label = childsmathLabel(admin); // AC86
+      if (!label) throw new Error('no course label with a term on student_admin.php');
       const marks = parseMarks(textLines(await (await get(`${base}/marks.php`)).text()));
       items.push(...applyMarks(childsmathItems(admin, label), marks, label));
       read++;

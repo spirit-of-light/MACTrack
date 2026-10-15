@@ -17,6 +17,7 @@
   tr.upcoming { background: #fff3c4; }
   tr.missing { opacity: .55; }
   .src { color: #888; font-size: .85em; }
+  .info { color: #555; margin: 0 0 .3rem; }
 </style>
 <h1>MacTracker</h1>
 <div id="banners"></div>
@@ -120,7 +121,9 @@ function render() {
     const rows = data.items.filter((i) => (i.course ?? '(no course)') === c && keep(i)).sort((a, b) => dueMs(a) - dueMs(b));
     const head = $('tr', {}, ...['Done', 'Title', 'Kind', 'Due', 'Weight', 'Mark', 'Out of', 'Progress', 'Source', '']
       .map((h) => $('th', { textContent: h })));
+    const info = (g.info || []).map((i) => `${i.name}: ${i.value}`).join(' · '); // AC91
     const s = $('section', {}, $('h2', { textContent: `${c} — ${summary}` }),
+      ...(info ? [$('p', { className: 'info', textContent: info })] : []),
       $('table', {}, $('thead', {}, head), $('tbody', {}, ...rows.map(row))));
     s.style.setProperty('--c', color);
     return s;

@@ -49,8 +49,16 @@ def norm_title(title, course):
 
 
 def kind(title):
-    """AC11/AC46/AC80: first keyword in KINDS order that starts a word; else `other`."""
+    """AC90 `practice` first, then AC11/AC80: first keyword in KINDS order that starts a word; else `other`."""
+    if re.search(r"\bpractice", title, re.I):
+        return "practice"
     return next((k for k in KINDS if re.search(r"\b" + k, title, re.I)), "other")
+
+
+def category_kind(name):
+    """AC46: an outline category's kind; a `practice` category maps to no kind (AC90), so `other`."""
+    k = kind(name)
+    return "other" if k == "practice" else k
 
 
 def connect(db):
@@ -74,6 +82,15 @@ def ingest(db, body):
         and isinstance(m.get("value"), (int, float)) and not isinstance(m["value"], bool) for m in marks
     ):
         raise ValueError("category_marks must be [{course, name, value}]")
+    info = body.get("course_info") or []
+    if not isinstance(info, list) or not all(
+        isinstance(i, dict) and isinstance(i.get("course"), str) and isinstance(i.get("name"), str)
+        and isinstance(i.get("value", ""), (str, int, float)) and not isinstance(i.get("value"), bool) for i in info
+    ):
+        raise ValueError("course_info must be [{course, name, value}]")
+    info_by_course = {}  # AC91: a course's info is replaced as a whole, in sent order
+    for i in info:
+        info_by_course.setdefault(course_key(i["course"]), []).append({"name": i["name"], "value": i.get("value", "")})
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     c = connect(db)
     try:
@@ -82,6 +99,8 @@ def ingest(db, body):
             for m in marks:  # AC72: keyed by the AC36-normalized category name
                 code = course_key(m["course"])
                 update_weights(c, code, lambda w: w["category_marks"].update({norm_title(m["name"], code): m["value"]}))
+            for code, entries in info_by_course.items():
+                update_weights(c, code, lambda w, e=entries: w.update(info=e))
             if status == "ok":  # AC43/AC50: flag everything, the upserts below clear what is present
                 c.execute("UPDATE items SET missing = 1 WHERE source = ?", (source,))
             for i in items:
@@ -145,12 +164,15 @@ def parse_due(s):
     return d if d.tzinfo else d.astimezone()
 
 
-def same_assessment(a, b):
-    """AC7/AC8 dedup rule: other source, same course key and norm_title, both dues within 1 day."""
-    da, db_ = parse_due(a["due"]), parse_due(b["due"])
-    return (a["source"] != b["source"] and a["course"] == b["course"] and da and db_
-            and abs(da - db_) <= timedelta(days=1)
-            and norm_title(a["title"] or "", a["course"] or "") == norm_title(b["title"] or "", b["course"] or ""))
+def same_assessment(kept, r):
+    """AC7/AC8/AC88: a source not yet in the kept group, same course key and norm_title, and dues
+    within 1 day when both have one. Outline placeholders never merge (AC84 governs them)."""
+    if r["source"] in kept["_sources"] or "outline" in (r["source"], kept["source"]) or kept["course"] != r["course"]:
+        return False
+    if norm_title(kept["title"] or "", kept["course"] or "") != norm_title(r["title"] or "", r["course"] or ""):
+        return False
+    da, db_ = parse_due(kept["due"]), parse_due(r["due"])
+    return not (da and db_) or abs(da - db_) <= timedelta(days=1)
 
 
 def apply_overrides(row):
@@ -161,22 +183,30 @@ def apply_overrides(row):
 def merged_items(db):
     """Raw rows with overrides applied, deduped across sources (AC7/8/9/37/38/48)."""
     out = []
-    raw = rows(db, "SELECT * FROM items ORDER BY source != 'avenue', id")  # Avenue rows become the kept ones
+    # AC88: the kept row is the first by source priority avenue > crowdmark > childsmath.
+    raw = rows(db, "SELECT * FROM items ORDER BY CASE source WHEN 'avenue' THEN 0 WHEN 'crowdmark' THEN 1 "
+                   "WHEN 'childsmath' THEN 2 ELSE 3 END, id")
     for r in raw:
         r["overridden"] = json.loads(r["overridden"] or "{}")
         apply_overrides(r)
         # ponytail: O(n^2) scan; fine for a student's few hundred items
         kept = next((k for k in out if same_assessment(k, r)), None)
         if kept is None:
+            r["_sources"] = {r["source"]}
             out.append(r)
             continue
-        for f, v in r.items():  # AC37: fill the kept row's empty fields
+        kept["_sources"].add(r["source"])
+        for f, v in r.items():  # AC37/AC89: fill the kept row's empty fields, due included
             if kept.get(f) is None:
                 kept[f] = v
         for f, o in r["overridden"].items():  # AC38/AC48: union, later edit wins
             if f not in kept["overridden"] or o["at"] > kept["overridden"][f]["at"]:
                 kept["overridden"][f] = o
         apply_overrides(kept)
+    for r in out:
+        del r["_sources"]
+        if r["mark"] is not None:  # AC87: a marked item is done, a mark of 0 included
+            r["done"] = True
     return sorted(out, key=lambda r: r["id"])
 
 
@@ -191,7 +221,8 @@ def course_view(db):
     outlines = {r["code"]: json.loads(r["weights"]) for r in rows(db, "SELECT * FROM courses") if r["weights"]}
     by_course = {}
     for it in items:
-        it["_bucket"] = bucket_of(it["title"], it["course"], it["kind"])
+        # AC90: practice items get no bucket, so no weight and no grade
+        it["_bucket"] = None if it["kind"] == "practice" else bucket_of(it["title"], it["course"], it["kind"])
         by_course.setdefault(it["course"], []).append(it)
 
     # Item weights per scheme (AC40/AC52/AC56): bucket weight / N; a user weight override wins.
@@ -212,7 +243,7 @@ def course_view(db):
         bucket_w = [{} for _ in schemes]
         for bw, scheme in zip(bucket_w, schemes):
             for name, w in scheme.items():
-                b = bucket_of(name, code, kind(name))
+                b = bucket_of(name, code, category_kind(name))
                 bw[b] = bw.get(b, 0) + w
         for it in its:
             if it["_bucket"] is None:
@@ -240,13 +271,14 @@ def course_view(db):
                     marked.add(it["_bucket"])
             for name, cw in scheme.items():  # AC73/AC74: category mark only for unmarked buckets
                 m = marks.get(norm_title(name, code))
-                if m is not None and bucket_of(name, code, kind(name)) not in marked:
+                if m is not None and bucket_of(name, code, category_kind(name)) not in marked:
                     score += cw * m / 100
                     graded += cw
             total = sum(scheme.values())
             if graded and (best[0] is None or score / graded * 100 > best[0]):  # AC56: higher scheme
                 best = (score / graded * 100, graded / total * 100 if total else 0)
-        courses[code] = {"grade": best[0], "graded_pct": best[1], "approximate": bool(w.get("approximate"))}
+        courses[code] = {"grade": best[0], "graded_pct": best[1], "approximate": bool(w.get("approximate")),
+                         "info": w.get("info", [])}
     for it in items:
         del it["_bucket"], it["_ws"]
     return {"items": items, "courses": courses}
@@ -319,7 +351,7 @@ def store_outline(db, course, categories):
         with c:
             c.execute("BEGIN IMMEDIATE")
             update_weights(c, code, change)
-            keep = [f"{code}:{name}" for name in parsed if kind(name) == "other"]
+            keep = [f"{code}:{name}" for name in parsed if category_kind(name) == "other"]
             # Session default: a category gone from the re-posted outline loses its placeholder,
             # unless the user edited it.
             c.execute(
@@ -328,7 +360,7 @@ def store_outline(db, course, categories):
                 (code, *keep),
             )
             for name in parsed:
-                if kind(name) == "other":
+                if category_kind(name) == "other":
                     # source_id carries the course: two courses can both have "Participation".
                     c.execute(
                         "INSERT INTO items (course, source, source_id, title, kind, weight) "
