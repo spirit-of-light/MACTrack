@@ -2,8 +2,12 @@
   "manifest_version": 3,
   "name": "MacTracker",
   "version": "0.1.0",
-  "browser_specific_settings": { "gecko": { "id": "mactracker@local" } },
-  "background": { "scripts": ["parse.js"] },
+  "browser_specific_settings": {
+    "gecko": { "id": "mactracker@local", "data_collection_permissions": { "required": ["none"] } }
+  },
+  "background": { "scripts": ["parse.js", "background.js"] },
+  "action": { "default_title": "Sync MacTracker" },
+  "options_ui": { "page": "options.html" },
   "permissions": ["alarms", "storage"],
   "host_permissions": [
     "https://avenue.cllmcmaster.ca/*",

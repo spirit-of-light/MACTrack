@@ -4,6 +4,7 @@ Plain `assert` functions named test_*; the runner below calls each one,
 prints `FAIL <name>: <exception>` per failure and exits 1 if any fail.
 """
 import json
+import re
 from datetime import datetime
 import shutil
 import sqlite3
@@ -940,6 +941,146 @@ def test_extension_js():
     assert node, "node not found on PATH (needed for test_extension.js)"
     r = subprocess.run([node, "test_extension.js"], cwd=ROOT, capture_output=True, text=True)
     assert r.returncode == 0, (r.stdout + r.stderr).strip()[-2000:]
+
+
+# ---- Step 10: extension shell (static checks; the live run is manual in Zen) ------
+
+EXT = ROOT / "extension"
+HOSTS = ("avenue.cllmcmaster.ca", "mcmaster.simplesyllabusca.com", "app.crowdmark.com", "www.childsmath.ca", "127.0.0.1:8000")
+
+
+def ext(name):
+    return (EXT / name).read_text()
+
+
+def js_function(src, name):
+    """Body of `function name(...) {...}` / `const name = (...) => {...}` (brace-matched; strings not parsed)."""
+    m = re.search(rf"(?:async\s+)?function\s+{name}\s*\(|(?:const|let|var)\s+{name}\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>\s*\{{", src)
+    assert m, f"no function {name} in background.js"
+    i = src.index("{", m.end() - 1 if src[m.end() - 1] == "{" else src.index(")", m.end() - 1))
+    depth = 0
+    for j in range(i, len(src)):
+        depth += {"{": 1, "}": -1}.get(src[j], 0)
+        if depth == 0:
+            return src[i:j + 1]
+    raise AssertionError(f"unbalanced braces in {name}")
+
+
+def call_args(src, start):
+    """Text of the parenthesised arguments that open at src[start] == '('."""
+    depth = 0
+    for j in range(start, len(src)):
+        depth += {"(": 1, ")": -1}.get(src[j], 0)
+        if depth == 0:
+            return src[start:j + 1]
+    raise AssertionError("unbalanced parens")
+
+
+def fetch_calls(src):
+    return [call_args(src, m.end() - 1) for m in re.finditer(r"(?<![\w.])fetch\s*\(", src)]
+
+
+def server_names(src):
+    """Identifiers bound to a string pointing at the local server, plus the literal itself."""
+    return ["127.0.0.1"] + re.findall(r"(?:const|let|var)\s+(\w+)\s*=\s*['\"`]http://127\.0\.0\.1:8000", src)
+
+
+# AC17 (+ AC18 no popup, AC35 options page) — manifest shape
+def test_manifest():
+    m = json.loads(ext("manifest.json"))
+    assert m["manifest_version"] == 3, m.get("manifest_version")
+    gecko = m["browser_specific_settings"]["gecko"]
+    assert gecko.get("id"), gecko
+    assert gecko.get("data_collection_permissions") == {"required": ["none"]}, gecko
+    scripts = m["background"]["scripts"]
+    assert "parse.js" in scripts and "background.js" in scripts, scripts
+    assert scripts.index("parse.js") < scripts.index("background.js"), scripts
+    assert {"alarms", "storage"} <= set(m["permissions"]), m["permissions"]
+    assert "cookies" not in m["permissions"], m["permissions"]
+    for host in HOSTS:
+        assert any(host in p for p in m["host_permissions"]), f"no host permission for {host}"
+    assert "action" in m, "no toolbar button (manifest `action`)"
+    assert "default_popup" not in m["action"], m["action"]
+    page = m["options_ui"]["page"]
+    assert (EXT / page).exists(), f"options page {page} missing"
+    for f in scripts:
+        assert (EXT / f).exists(), f"background script {f} missing"
+
+
+# AC35 — options page stores the token in browser.storage; posts carry it as X-Token
+def test_options_token():
+    html = ext(json.loads(ext("manifest.json"))["options_ui"]["page"])
+    assert re.search(r"<script[^>]*\bsrc=['\"]options\.js['\"]", html), "options page does not load options.js"
+    assert not re.search(r"<script(?![^>]*\bsrc=)[^>]*>\s*\S", html), "inline script (blocked by MV3 CSP)"
+    assert "browser.storage.local.set" in ext("options.js"), "options.js does not save to browser.storage.local"
+    bg = ext("background.js")
+    assert "browser.storage.local.get" in bg, "background.js does not read the token from browser.storage.local"
+    posts = [a for a in fetch_calls(bg) if any(n in a for n in server_names(bg))]
+    assert posts, "no fetch to the local server"
+    assert all("X-Token" in a for a in posts) or "X-Token" in js_function(bg, "post"), "server post without X-Token"
+
+
+# AC19 — 3-hour alarm runs sync
+def test_alarm_period():
+    bg = ext("background.js")
+    assert re.search(r"browser\.alarms\.create\([^)]*periodInMinutes\s*:\s*180\b", bg), "no 180-minute alarm"
+    assert re.search(r"browser\.alarms\.onAlarm\.addListener\([^\n]*\bsync\b", bg), "onAlarm does not call sync"
+
+
+# AC18 + AC45 — toolbar click runs sync immediately
+def test_toolbar_click():
+    bg = ext("background.js")
+    assert re.search(r"browser\.action\.onClicked\.addListener\([^\n]*\bsync\b", bg), "toolbar click does not call sync"
+
+
+# AC22 — source fetches use credentials 'include'; no cookie access anywhere
+def test_no_cookies():
+    for f in EXT.iterdir():
+        assert "cookie" not in f.read_text().lower(), f"`cookie` in extension/{f.name}"
+    assert not fetch_calls(ext("parse.js")), "parse.js must stay pure (no fetch)"
+    bg = ext("background.js")
+    calls = fetch_calls(bg)
+    srv = server_names(bg)
+    include = [a for a in calls if re.search(r"credentials\s*:\s*['\"]include['\"]", a)]
+    assert include, "no fetch with credentials: 'include'"
+    assert re.search(r"credentials\s*:\s*['\"]include['\"]", js_function(bg, "get")), "get() does not use credentials: 'include'"
+    stray = [a for a in calls if a not in include and not any(n in a for n in srv)]
+    assert not stray, f"source fetch without credentials 'include': {stray}"
+
+
+# AC78 — childsmath is read with GET only; its forms are never submitted
+def test_childsmath_get_only():
+    bg = ext("background.js")
+    body = js_function(bg, "childsmath")
+    assert not re.search(r"method\s*:|\.submit\s*\(|['\"]POST['\"]", body, re.I), "non-GET request in childsmath()"
+    posting = {n for n in re.findall(r"(?:function\s+|(?:const|let|var)\s+)(\w+)", bg)
+               if n != "childsmath" and re.search(r"method\s*:|['\"]POST['\"]", _safe_body(bg, n) or "")}
+    called = {n for n in posting if re.search(rf"\b{n}\s*\(", body)}
+    assert not called, f"childsmath() calls POST-capable helpers {called}"
+
+
+def _safe_body(src, name):
+    try:
+        return js_function(src, name)
+    except AssertionError:
+        return None
+
+
+# Implementer requirement — avenue() puts the course on each categoryMarks entry (server rejects ingest without it)
+def test_category_marks_course():
+    body = js_function(ext("background.js"), "avenue")
+    windows = [body[m.start():m.start() + 200] for m in re.finditer(r"categoryMarks", body)]
+    assert any(re.search(r"\bcourse\b", w) for w in windows), "avenue() does not attach course to categoryMarks"
+
+
+# Implementer requirement — a rejected post to the server is logged, not swallowed
+def test_sync_logs_rejected_posts():
+    bg = ext("background.js")
+    post = next((_safe_body(bg, n) for n in re.findall(r"(?:function\s+|(?:const|let|var)\s+)(\w+)", bg)
+                 if "X-Token" in (_safe_body(bg, n) or "")), None)
+    assert post, "no function sending X-Token"
+    assert re.search(r"\.ok\b|\.status\b", post), "server post does not check the response"
+    assert re.search(r"console\.(error|warn)", post), "rejected server post is not logged"
 
 
 if __name__ == "__main__":
