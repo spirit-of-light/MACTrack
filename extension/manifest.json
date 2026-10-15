@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "MacTracker",
+  "version": "0.1.0",
+  "browser_specific_settings": { "gecko": { "id": "mactracker@local" } },
+  "background": { "scripts": ["parse.js"] },
+  "permissions": ["alarms", "storage"],
+  "host_permissions": [
+    "https://avenue.cllmcmaster.ca/*",
+    "https://mcmaster.simplesyllabusca.com/*",
+    "https://app.crowdmark.com/*",
+    "https://www.childsmath.ca/*",
+    "http://127.0.0.1:8000/*"
+  ]
+}
