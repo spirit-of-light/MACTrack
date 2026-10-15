@@ -24,6 +24,18 @@ async function json(url) {
   return r.json();
 }
 
+// A course without a tool (e.g. a training course) answers non-OK: warn and use `empty`.
+// A login page still fails the whole source.
+async function optional(url, empty) {
+  try {
+    return await json(url);
+  } catch (e) {
+    if (e instanceof LoginNeeded) throw e;
+    console.warn(`MacTracker: skipped ${url}: ${e.message}`);
+    return empty;
+  }
+}
+
 function doc(html) {
   return new DOMParser().parseFromString(html, 'text/html');
 }
@@ -98,17 +110,17 @@ async function avenue() {
   const categoryMarks = [];
   for (const c of Courses.filter((x) => x.IsActive)) { // AC53
     const api = `${AVENUE}/d2l/api/le/1.45/${c.OrgUnitId}`;
-    const folders = await json(`${api}/dropbox/folders/`);
+    const folders = await optional(`${api}/dropbox/folders/`, []);
     const subs = {};
-    for (const f of folders) subs[f.Id] = await json(`${api}/dropbox/folders/${f.Id}/submissions/`);
+    for (const f of folders) subs[f.Id] = await optional(`${api}/dropbox/folders/${f.Id}/submissions/`, []);
     const quizzes = [];
     for (let url = `${api}/quizzes/`; url;) { // AC68: follow Next
-      const page = await json(url);
+      const page = await optional(url, { Objects: [], Next: null });
       quizzes.push(...page.Objects);
       url = page.Next ? new URL(page.Next, url).href : null;
     }
-    const grades = await json(`${api}/grades/`);
-    const values = await json(`${api}/grades/values/myGradeValues/`);
+    const grades = await optional(`${api}/grades/`, []);
+    const values = await optional(`${api}/grades/values/myGradeValues/`, []);
     const r = avenueItems({ folders, subs, quizzes, grades, values });
     items.push(...r.items.map((i) => ({ ...i, course: c.Code })));
     categoryMarks.push(...r.categoryMarks.map((m) => ({ ...m, course: c.Code })));
@@ -135,15 +147,23 @@ async function crowdmark() {
 // AC25/AC71/AC78: GET-only reads of the two childsmath course areas; the marks-page form is never sent.
 async function childsmath() {
   const items = [];
-  for (const area of ['1bStuff', '1zStuff']) {
-    const base = `${CHILDSMATH}/childsa/forms/${area}`;
-    const admin = textLines(await (await get(`${base}/student_admin.php`)).text());
-    const m = admin.map((l) => /([A-Za-z]+)\s*(\d[A-Za-z0-9]{3})\b.*?\b([FWS]\d{2})\b/.exec(l)).find(Boolean);
-    if (!m) throw new Error(`no course label with a term on ${area}/student_admin.php`);
-    const label = `${m[1]} ${m[2]} ${m[3]}`;
-    const marks = parseMarks(textLines(await (await get(`${base}/marks.php`)).text()));
-    items.push(...applyMarks(childsmathItems(admin, label), marks, label));
+  let read = 0;
+  for (const area of ['1bStuff', '1zStuff']) { // an area the student is not in is skipped, not fatal
+    try {
+      const base = `${CHILDSMATH}/childsa/forms/${area}`;
+      const admin = textLines(await (await get(`${base}/student_admin.php`)).text());
+      const m = admin.map((l) => /([A-Za-z]+)\s*(\d[A-Za-z0-9]{3})\b.*?\b([FWS]\d{2})\b/.exec(l)).find(Boolean);
+      if (!m) throw new Error('no course label with a term on student_admin.php');
+      const label = `${m[1]} ${m[2]} ${m[3]}`;
+      const marks = parseMarks(textLines(await (await get(`${base}/marks.php`)).text()));
+      items.push(...applyMarks(childsmathItems(admin, label), marks, label));
+      read++;
+    } catch (e) {
+      if (e instanceof LoginNeeded) throw e;
+      console.warn(`MacTracker: skipped childsmath ${area}: ${e.message}`);
+    }
   }
+  if (!read) throw new Error('no childsmath course area could be read');
   return { items };
 }
 
