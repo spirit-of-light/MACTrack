@@ -352,7 +352,40 @@ def ensure_token(path):
     return token
 
 
+TOKEN_ROUTES = ("/api/ingest", "/api/outline")
+
+
 class Handler(BaseHTTPRequestHandler):
+    cors = None  # origin echoed in Access-Control-Allow-Origin for this request, if any
+
+    def cors_origin(self):
+        """The extension's origin on a token route, else None. The page and other sites never get CORS."""
+        origin = self.headers.get("Origin", "")
+        if origin.startswith("moz-extension://") and urlsplit(self.path).path in TOKEN_ROUTES:
+            return origin
+        return None
+
+    def end_headers(self):
+        if self.cors:
+            self.send_header("Access-Control-Allow-Origin", self.cors)
+            self.send_header("Vary", "Origin")
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        # Firefox preflights the extension's JSON/X-Token POSTs even with a host permission.
+        self.cors = None
+        if not self.host_ok():
+            return
+        origin = self.cors_origin()
+        if not origin:
+            return self.send_error(501, "Unsupported method ('OPTIONS')")
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Methods", "POST")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Token")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.cors = origin
+        self.end_headers()
+
     def host_ok(self):
         port = self.server.server_address[1]
         if self.headers.get("Host") in (f"127.0.0.1:{port}", f"localhost:{port}"):
@@ -390,6 +423,7 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):
+        self.cors = None
         if not self.host_ok():
             return
         db = self.server.db
@@ -403,8 +437,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_POST(self):
+        self.cors = None
         if not self.host_ok():
             return
+        self.cors = self.cors_origin()
         data = self.body()
         if data is None:
             return
@@ -439,7 +475,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def post_override(self, item_id, data):
         # No token: the page has none. CSRF guard = JSON content type (forces a CORS preflight,
-        # which this server never grants: no do_OPTIONS, no Access-Control-* headers) + Host allowlist.
+        # which do_OPTIONS refuses for this route: no Access-Control-* headers) + Host allowlist.
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             return self.send_error(415, "Content-Type must be application/json")
         try:

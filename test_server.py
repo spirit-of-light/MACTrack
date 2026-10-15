@@ -607,6 +607,66 @@ def test_no_cors_preflight():
         assert override(s, 999, {"mark": 1}) == 404
 
 
+def raw_request(s, method, path, headers, data=None):
+    req = urllib.request.Request(s.url + path, data, headers, method=method)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, r.headers
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers
+
+
+def acao_headers(headers):
+    return [h for h in headers if h.lower().startswith("access-control-")]
+
+
+EXT_ORIGIN = "moz-extension://abc"
+PREFLIGHT = {"Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "content-type,x-token"}
+
+
+# Zen run fix — the extension's CORS preflight on the token routes is granted, to its exact origin only
+def test_extension_preflight():
+    with InProcess() as s:
+        for path in ("/api/ingest", "/api/outline?course=X"):
+            code, h = raw_request(s, "OPTIONS", path, {"Origin": EXT_ORIGIN, **PREFLIGHT})
+            assert code == 204, (path, code)
+            assert h["Access-Control-Allow-Origin"] == EXT_ORIGIN, (path, dict(h))
+            assert h["Access-Control-Allow-Methods"] == "POST", dict(h)
+            assert h["Access-Control-Allow-Headers"] == "Content-Type, X-Token", dict(h)
+            assert h["Access-Control-Max-Age"] == "600", dict(h)
+            assert h["Vary"] == "Origin", dict(h)
+            for origin in ({"Origin": "https://evil.example"}, {}):
+                code, h = raw_request(s, "OPTIONS", path, {**origin, **PREFLIGHT})
+                assert code >= 400 and not acao_headers(h), (path, origin, code, dict(h))
+        ingest_ok(s, "avenue", [item("1")])
+        rid = get_items(s)[0]["id"]
+        for path in (f"/api/items/{rid}", "/api/items", "/api/status", "/"):
+            code, h = raw_request(s, "OPTIONS", path, {"Origin": EXT_ORIGIN, **PREFLIGHT})
+            assert code >= 400 and not acao_headers(h), (path, code, dict(h))
+        code, h = raw_request(s, "OPTIONS", "/api/ingest", {"Origin": EXT_ORIGIN, "Host": "evil.example", **PREFLIGHT})
+        assert code == 403 and not acao_headers(h), (code, dict(h))
+
+
+# Zen run fix — token-route POST responses carry ACAO for the extension origin; other routes never do
+def test_extension_post_acao():
+    with InProcess() as s:
+        body = json.dumps({"source": "avenue", "items": [item("1")], "status": "ok"}).encode()
+        hdr = {"Origin": EXT_ORIGIN, "Content-Type": "application/json", "X-Token": s.token}
+        code, h = raw_request(s, "POST", "/api/ingest", hdr, body)
+        assert code == 200 and h["Access-Control-Allow-Origin"] == EXT_ORIGIN and h["Vary"] == "Origin", (code, dict(h))
+        code, h = raw_request(s, "POST", "/api/ingest", {**hdr, "X-Token": "wrong"}, body)
+        assert code == 401, code  # token check unchanged
+        code, h = raw_request(s, "POST", "/api/ingest", {**hdr, "Origin": "https://evil.example"}, body)
+        assert code == 200 and not acao_headers(h), dict(h)
+        rid = get_items(s)[0]["id"]
+        code, h = raw_request(s, "POST", f"/api/items/{rid}", {"Origin": EXT_ORIGIN, "Content-Type": "application/json"},
+                              json.dumps({"mark": 1}).encode())
+        assert code == 200 and not acao_headers(h), dict(h)
+        for path in ("/api/items", "/api/status", "/"):
+            code, h = raw_request(s, "GET", path, {"Origin": EXT_ORIGIN})
+            assert code == 200 and not acao_headers(h), (path, dict(h))
+
+
 # ---- Step 5: outlines -----------------------------------------------------------
 
 OUTLINE_TEXT = """MATH 1ZA3 Course Outline
