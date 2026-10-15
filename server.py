@@ -2,6 +2,7 @@
 import hmac
 import io
 import json
+import math
 import os
 import re
 import secrets
@@ -33,6 +34,28 @@ STATUSES = ("ok", "login needed", "error")
 ITEM_FIELDS = ("course", "title", "due", "weight", "done", "mark", "out_of", "url", "progress", "closed")
 OVERRIDABLE = ("title", "kind", "due", "weight", "done", "mark", "out_of")
 SCALARS = (str, int, float, bool, type(None))
+TEXT_FIELDS = ("course", "title", "due", "kind", "url", "progress")
+NUMBER_FIELDS = ("weight", "mark", "out_of")
+BOOL_FIELDS = ("done", "closed")
+
+
+def field_ok(k, v):
+    """Per-field type check at the ingest and override boundaries; null is always allowed."""
+    if v is None:
+        return True
+    if k in NUMBER_FIELDS:
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    if k in BOOL_FIELDS:
+        return isinstance(v, bool)
+    if k in TEXT_FIELDS:
+        return isinstance(v, str)
+    return isinstance(v, SCALARS)
+
+
+def check_fields(fields):
+    bad = [k for k, v in fields.items() if not field_ok(k, v)]
+    if bad:
+        raise ValueError(f"wrong type for {', '.join(bad)}")
 KINDS = ("exam", "midterm", "test", "quiz", "lab", "assignment", "homework")
 
 
@@ -67,6 +90,24 @@ def connect(db):
     return c
 
 
+def per_course(entries, value_ok, what):
+    """[{course, name?, value?}] -> {course key: [{name, value}]} in sent order. Raises ValueError."""
+    if entries is None:
+        return {}
+    if not isinstance(entries, list) or not all(
+        isinstance(e, dict) and isinstance(e.get("course"), str)
+        and ("name" not in e or (isinstance(e["name"], str) and value_ok(e.get("value", ""))))
+        for e in entries
+    ):
+        raise ValueError(f"{what} must be [{{course, name, value}}] or [{{course}}]")
+    out = {}
+    for e in entries:
+        group = out.setdefault(course_key(e["course"]), [])
+        if "name" in e:
+            group.append({"name": e["name"], "value": e.get("value", "")})
+    return out
+
+
 def ingest(db, body):
     """Store one source's sync. Raises ValueError on a malformed body (nothing written)."""
     source, items, status = body.get("source"), body.get("items"), body.get("status")
@@ -74,31 +115,22 @@ def ingest(db, body):
         raise ValueError("need source, status, items[]")
     if not all(isinstance(i, dict) and isinstance(i.get("source_id"), (str, int)) for i in items):
         raise ValueError("each item needs a source_id")
-    if not all(isinstance(v, SCALARS) for i in items for v in i.values()):
-        raise ValueError("item values must be scalars")
-    marks = body.get("category_marks") or []
-    if not isinstance(marks, list) or not all(
-        isinstance(m, dict) and isinstance(m.get("course"), str) and isinstance(m.get("name"), str)
-        and isinstance(m.get("value"), (int, float)) and not isinstance(m["value"], bool) for m in marks
-    ):
-        raise ValueError("category_marks must be [{course, name, value}]")
-    info = body.get("course_info") or []
-    if not isinstance(info, list) or not all(
-        isinstance(i, dict) and isinstance(i.get("course"), str) and isinstance(i.get("name"), str)
-        and isinstance(i.get("value", ""), (str, int, float)) and not isinstance(i.get("value"), bool) for i in info
-    ):
-        raise ValueError("course_info must be [{course, name, value}]")
-    info_by_course = {}  # AC91: a course's info is replaced as a whole, in sent order
-    for i in info:
-        info_by_course.setdefault(course_key(i["course"]), []).append({"name": i["name"], "value": i.get("value", "")})
+    for i in items:
+        check_fields(i)
+    is_num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)  # noqa: E731
+    is_text = lambda v: isinstance(v, (str, int, float)) and not isinstance(v, bool)  # noqa: E731
+    # AC72/AC91: each course named here has its marks/info replaced as a whole; a bare {course}
+    # entry names a course that has none. Courses not named are left alone.
+    marks_by_course = per_course(body.get("category_marks"), is_num, "category_marks")
+    info_by_course = per_course(body.get("course_info"), is_text, "course_info")
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     c = connect(db)
     try:
         with c:  # one transaction
             c.execute("BEGIN IMMEDIATE")
-            for m in marks:  # AC72: keyed by the AC36-normalized category name
-                code = course_key(m["course"])
-                update_weights(c, code, lambda w: w["category_marks"].update({norm_title(m["name"], code): m["value"]}))
+            for code, entries in marks_by_course.items():  # AC72: keyed by the AC36-normalized name
+                marks = {norm_title(e["name"], code): e["value"] for e in entries}
+                update_weights(c, code, lambda w, m=marks: w.update(category_marks=m))
             for code, entries in info_by_course.items():
                 update_weights(c, code, lambda w, e=entries: w.update(info=e))
             if status == "ok":  # AC43/AC50: flag everything, the upserts below clear what is present
@@ -136,8 +168,9 @@ def rows(db, sql):
 
 def set_override(db, item_id, fields):
     """AC10: record user edits as {field: {value, at}}. Returns False if the item does not exist."""
-    if not fields or not all(k in OVERRIDABLE and isinstance(v, SCALARS) for k, v in fields.items()):
-        raise ValueError(f"only {', '.join(OVERRIDABLE)} can be edited, as scalars")
+    if not fields or not all(k in OVERRIDABLE for k in fields):
+        raise ValueError(f"only {', '.join(OVERRIDABLE)} can be edited")
+    check_fields(fields)
     at = datetime.now(timezone.utc).isoformat(timespec="microseconds")  # fixed width: sorts as text
     c = connect(db)
     try:
@@ -373,11 +406,14 @@ def store_outline(db, course, categories):
 
 
 def ensure_token(path):
-    """Write a random token unless the file exists; return the token."""
+    """Write a random token unless the file holds one already; return the token."""
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        return Path(path).read_text().strip()
+        token = Path(path).read_text().strip()
+        if token:
+            return token
+        fd = os.open(path, os.O_WRONLY | os.O_TRUNC)  # blank file: never run with an empty token
     token = secrets.token_hex(16)
     with os.fdopen(fd, "w") as f:
         f.write(token + "\n")
@@ -449,7 +485,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def token_ok(self):
         sent = self.headers.get("X-Token", "").encode()
-        if hmac.compare_digest(sent, self.server.token.encode()):
+        if sent and self.server.token and hmac.compare_digest(sent, self.server.token.encode()):
             return True
         self.send_error(401)
         return False
@@ -501,7 +537,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:  # AC64: JSON outline, no pypdf
                     store_outline(self.server.db, body.get("course"), body.get("categories"))
         except ValueError as e:  # includes JSONDecodeError
-            return self.send_error(400, str(e))
+            return self.send_error(400, "Bad Request", str(e))  # detail goes in the body, so non-ASCII is safe
         self.json(200, {"ok": True})
 
 
@@ -516,7 +552,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("body must be an object")
             found = set_override(self.server.db, item_id, fields)
         except ValueError as e:
-            return self.send_error(400, str(e))
+            return self.send_error(400, "Bad Request", str(e))  # detail goes in the body, so non-ASCII is safe
         if not found:
             return self.send_error(404)
         self.json(200, {"ok": True})

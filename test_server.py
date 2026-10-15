@@ -69,13 +69,19 @@ class Running:
 
 class InProcess:
     """Run server.make_server() in a thread on a free port with a temp DB and token.
-    Use for route tests: `with InProcess() as s: s.url, s.token, s.db`."""
+    Use for route tests: `with InProcess() as s: s.url, s.token, s.db`.
+    token_text, if given, is written to token.txt before the server starts."""
+
+    def __init__(self, token_text=None):
+        self.token_text = token_text
 
     def __enter__(self):
         import server
 
         self.dir = Path(tempfile.mkdtemp())
         self.db = self.dir / "test.db"
+        if self.token_text is not None:
+            (self.dir / "token.txt").write_text(self.token_text)
         self.srv = server.make_server(("127.0.0.1", 0), self.db, self.dir / "token.txt")
         self.token = self.srv.token
         self.port = self.srv.server_address[1]
@@ -1296,6 +1302,102 @@ def test_course_info_stored():
 def test_index_course_info():
     html = (ROOT / "index.html").read_text()
     assert re.search(r"\.info\b|\[\s*['\"]info['\"]\s*\]", html), "index.html never reads courses[code].info"
+
+
+
+# ---- Review findings ---------------------------------------------------------------
+
+# Review MAJOR 1 — an empty or blank token.txt is replaced by a fresh token, never an empty one
+def test_empty_token_file_regenerated():
+    for text in ("", "  \n"):
+        with InProcess(token_text=text) as s:
+            t = (s.dir / "token.txt").read_text().strip()
+            assert len(t) >= 16 and s.token == t, (text, t, s.token)
+            body = {"source": "avenue", "items": [], "status": "ok"}
+            assert call(s, "POST", "/api/ingest", body, token=None)[0] == 401
+            assert call(s, "POST", "/api/ingest", body, token="")[0] == 401
+
+
+# Review MAJOR 1 — an empty X-Token is refused outright
+def test_empty_x_token_refused():
+    with InProcess() as s:
+        assert ingest(s, "avenue", [item("1")], token="") == 401
+
+
+# Review MAJOR 2 — override values are type-checked per field; a bad one is a 400 and writes nothing
+def test_override_field_types():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1", mark=5, out_of=10)])
+        rid = get_items(s)[0]["id"]
+        before = db_dump(s)
+        for bad in ({"mark": "abc"}, {"weight": True}, {"out_of": "10"}, {"done": "yes"}, {"done": 1},
+                    {"title": 5}, {"due": 20261020}, {"kind": ["quiz"]}):
+            assert override(s, rid, bad) == 400, bad
+        assert db_dump(s) == before, "DB changed on a bad override"
+        assert get_items(s)[0]["mark"] == 5
+        override_ok(s, rid, {"mark": None, "done": True, "title": "T", "due": None, "weight": 2.5})
+
+
+# Review MAJOR 2 — ingest values are type-checked per field; a bad one is a 400 and writes nothing
+def test_ingest_field_types():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1", mark=5)])
+        before = db_dump(s)
+        for bad in ({"mark": "abc"}, {"out_of": True}, {"weight": "5"}, {"done": "true"}, {"done": 1},
+                    {"closed": "no"}, {"title": 3}, {"due": 1}, {"url": 1}, {"progress": 3}, {"course": 1}):
+            code, _ = call(s, "POST", "/api/ingest", {"source": "avenue", "status": "ok", "items": [item("2", **bad)]})
+            assert code == 400, (bad, code)
+        assert db_dump(s) == before, "DB changed on a bad ingest"
+
+
+# Review MINOR 3 — a non-ASCII error detail still gets a 400 response (no dropped connection)
+def test_error_detail_non_ascii():
+    with InProcess() as s:
+        code = post_outline(s, "MATH 1ZA3", cats(("Final Exam", "40\u201455%")), "application/json")
+        assert code == 400, code
+
+
+# Review MINOR 6 — an ingest naming a course replaces its category marks and info as a whole; a bare
+# {course} entry names a course with none, which clears it; courses not named are left alone
+def test_course_marks_and_info_replaced():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1")],
+                  category_marks=[{"course": "MATH 1ZA3", "name": "Online Homework", "value": 80},
+                                  {"course": "CHEM 1A03", "name": "Labs", "value": 70}],
+                  course_info=[{"course": "MATH 1ZA3", "name": "Lab Room", "value": "ABB 102"},
+                               {"course": "CHEM 1A03", "name": "Lab Section", "value": "L07"}])
+        ingest_ok(s, "avenue", [item("1")],
+                  category_marks=[{"course": "MATH 1ZA3", "name": "Engagement", "value": 90}, {"course": "CHEM 1A03"}],
+                  course_info=[{"course": "MATH 1ZA3"}])
+        assert course_weights(s, "MATH 1ZA3")["category_marks"] == {"engagement": 90}
+        assert course_weights(s, "CHEM 1A03")["category_marks"] == {}
+        c = get_courses(s)
+        assert c["MATH 1ZA3"]["info"] == [] and c["CHEM 1A03"]["info"] == [{"name": "Lab Section", "value": "L07"}], c
+        ingest_ok(s, "avenue", [item("1")])
+        assert course_weights(s, "MATH 1ZA3")["category_marks"] == {"engagement": 90}, "ingest without the key changed marks"
+
+
+# Review MINOR 4 — the LTI replay only submits forms to Avenue or Simple Syllabus and checks each hop
+def test_lti_replay_checks():
+    body = js_function(ext("background.js"), "syllabusCategories")
+    assert re.search(r"\.origin\b", body) and "AVENUE" in body and "SYLLABUS" in body, "no form-action origin allowlist"
+    assert re.search(r"throw", body), "a disallowed form action is not refused"
+    hop = body[body.index("for ("):]
+    assert re.search(r"\.ok\b|checked\(|get\(", hop), "an LTI hop response is not checked"
+
+
+# Review MINOR 5 — the page offers the practice kind
+def test_index_kinds_practice():
+    m = re.search(r"const KINDS\s*=\s*\[([^\]]*)\]", (ROOT / "index.html").read_text())
+    assert m and "'practice'" in m.group(1), m and m.group(1)
+
+
+# Review MINOR 7 — the sync alarm is created once, not on every background start
+def test_alarm_created_once():
+    bg = ext("background.js")
+    create = bg.index("browser.alarms.create(")
+    before = bg[max(0, create - 200):create]
+    assert re.search(r"onInstalled|alarms\.get\(", before), "alarm re-created on every background start"
 
 
 if __name__ == "__main__":

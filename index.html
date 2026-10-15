@@ -33,7 +33,7 @@
 <main id="list"></main>
 <script>
 'use strict';
-const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'other'];
+const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'practice', 'other'];
 const $ = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 const days = () => Number(localStorage.getItem('upcomingDays')) || 7; // AC41/AC42/AC51: browser only
 let data = { items: [], courses: {} };

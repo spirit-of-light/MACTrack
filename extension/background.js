@@ -72,8 +72,13 @@ async function syllabusCategories(topicUrl) {
     if (!form) break;
     const params = new URLSearchParams();
     for (const input of form.querySelectorAll('input[name]')) params.append(input.name, input.value);
+    const action = new URL(form.getAttribute('action'), r.url);
+    if (![AVENUE, SYLLABUS].includes(action.origin)) throw new Error(`LTI form posts to ${action.origin}, refused`);
     // ponytail: LTI launch forms are always POST; a GET form would need the params in the URL.
-    r = await fetch(new URL(form.getAttribute('action'), r.url), { method: 'POST', body: params, credentials: 'include' });
+    r = await fetch(action, { method: 'POST', body: params, credentials: 'include' });
+    // Not get()'s login test: the chain legitimately passes through Simple Syllabus /ui/lti-login.
+    if (/\/d2l\/login/i.test(new URL(r.url).pathname)) throw new LoginNeeded(action.href);
+    if (!r.ok) throw new Error(`${r.status} from LTI hop ${action.href}`);
   }
   const code = ssCode(r.url);
   if (!code) throw new Error('Simple Syllabus launch did not reach a doc');
@@ -124,8 +129,9 @@ async function avenue() {
     const values = await optional(`${api}/grades/values/myGradeValues/`, []);
     const r = avenueItems({ code: c.Code, folders, subs, quizzes, grades, values });
     items.push(...r.items.map((i) => ({ ...i, course: c.Code })));
-    categoryMarks.push(...r.categoryMarks.map((m) => ({ ...m, course: c.Code })));
-    courseInfo.push(...r.courseInfo.map((i) => ({ ...i, course: c.Code })));
+    // A bare {course} entry tells the server this course was synced, so its old marks/info are replaced.
+    categoryMarks.push({ course: c.Code }, ...r.categoryMarks.map((m) => ({ ...m, course: c.Code })));
+    courseInfo.push({ course: c.Code }, ...r.courseInfo.map((i) => ({ ...i, course: c.Code })));
     // An outline failure is logged but never costs the course's items.
     await outline(c.OrgUnitId, c.Code).catch((e) => console.error(`MacTracker: outline for ${c.Code}:`, e));
   }
@@ -175,5 +181,6 @@ async function sync() {
 }
 
 browser.action.onClicked.addListener(() => sync());
-browser.alarms.create('sync', { periodInMinutes: 180 });
+// Created once: re-creating it on every background start would push the next sync back.
+browser.alarms.get('sync').then((a) => a || browser.alarms.create('sync', { periodInMinutes: 180 }));
 browser.alarms.onAlarm.addListener((alarm) => alarm.name === 'sync' && sync());
