@@ -3,3 +3,5 @@ token.txt
 .venv/
 __pycache__/
 web-ext-artifacts/
+.DS_Store
+.amo-upload-uuid
