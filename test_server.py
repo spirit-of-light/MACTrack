@@ -1,0 +1,956 @@
+"""MacTracker acceptance checks. Run: .venv/bin/python test_server.py
+
+Plain `assert` functions named test_*; the runner below calls each one,
+prints `FAIL <name>: <exception>` per failure and exits 1 if any fail.
+"""
+import json
+from datetime import datetime
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import traceback
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+
+
+class Running:
+    """Run a copy of server.py (and index.html) as `python server.py` in a temp dir,
+    so token.txt and the DB land there and never in the repo."""
+
+    def __init__(self, token=None):
+        import server  # noqa: F401  (fails with ModuleNotFoundError until server.py exists)
+
+        self.dir = Path(tempfile.mkdtemp())
+        shutil.copy(server.__file__, self.dir / "server.py")
+        if (ROOT / "index.html").exists():
+            shutil.copy(ROOT / "index.html", self.dir / "index.html")
+        if token is not None:
+            (self.dir / "token.txt").write_text(token)
+
+    def __enter__(self):
+        self.proc = subprocess.Popen(
+            [sys.executable, "server.py"], cwd=self.dir,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        deadline = time.time() + 10
+        while True:
+            if self.proc.poll() is not None:
+                shutil.rmtree(self.dir, ignore_errors=True)
+                raise AssertionError(f"server.py exited {self.proc.returncode}: {self.proc.stderr.read().decode()}")
+            try:
+                urllib.request.urlopen("http://127.0.0.1:8000/", timeout=1).close()
+                return self
+            except Exception:
+                if time.time() > deadline:
+                    self.__exit__()
+                    raise AssertionError("server.py did not answer on 127.0.0.1:8000 within 10s")
+                time.sleep(0.1)
+
+    def __exit__(self, *exc):
+        self.proc.terminate()
+        self.proc.wait(5)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+class InProcess:
+    """Run server.make_server() in a thread on a free port with a temp DB and token.
+    Use for route tests: `with InProcess() as s: s.url, s.token, s.db`."""
+
+    def __enter__(self):
+        import server
+
+        self.dir = Path(tempfile.mkdtemp())
+        self.db = self.dir / "test.db"
+        self.srv = server.make_server(("127.0.0.1", 0), self.db, self.dir / "token.txt")
+        self.token = self.srv.token
+        self.port = self.srv.server_address[1]
+        self.url = f"http://127.0.0.1:{self.port}"
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *exc):
+        self.srv.shutdown()
+        self.srv.server_close()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def status_of(method, url, headers=None, data=None):
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data, headers or {}, method=method)) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+# AC1 — bound to 127.0.0.1:8000 only
+def test_bind_localhost():
+    import server
+
+    assert server.ADDR == ("127.0.0.1", 8000), server.ADDR
+    with Running() as s:
+        out = subprocess.run(
+            ["lsof", "-nP", "-a", "-p", str(s.proc.pid), "-iTCP", "-sTCP:LISTEN"],
+            capture_output=True, text=True,
+        ).stdout
+        listens = [line.split()[8] for line in out.splitlines()[1:]]
+        assert listens == ["127.0.0.1:8000"], listens
+
+
+# AC2 — GET / returns index.html
+def test_get_root():
+    with Running() as s:
+        with urllib.request.urlopen("http://127.0.0.1:8000/") as r:
+            assert r.status == 200, r.status
+            assert r.read() == (s.dir / "index.html").read_bytes()
+
+
+# AC13 — .gitignore ignores *.db and token.txt
+def test_gitignore():
+    lines = (ROOT / ".gitignore").read_text().splitlines()
+    assert "*.db" in lines and "token.txt" in lines, lines
+    for name in ("tracker.db", "token.txt"):  # git allows -q with one path only
+        r = subprocess.run(["git", "check-ignore", "-q", name], cwd=ROOT)
+        assert r.returncode == 0, f"git does not ignore {name}"
+
+
+# AC33 — no token.txt: server writes a random one
+def test_token_created():
+    tokens = []
+    for _ in range(2):
+        with Running() as s:
+            t = (s.dir / "token.txt").read_text().strip()
+            assert len(t) >= 16, f"token too short: {t!r}"
+            tokens.append(t)
+    assert tokens[0] != tokens[1], "token is not random"
+
+
+# AC34 — existing token.txt is left unchanged
+def test_token_kept():
+    with Running(token="keep-me-0123456789abcdef\n") as s:
+        assert (s.dir / "token.txt").read_text() == "keep-me-0123456789abcdef\n"
+
+
+# Plan Step 1 — Host allowlist (DNS-rebinding guard)
+def test_host_allowlist():
+    with InProcess() as s:
+        assert status_of("GET", s.url + "/") == 200
+        assert status_of("GET", s.url + "/", {"Host": f"localhost:{s.port}"}) == 200
+        assert status_of("GET", s.url + "/", {"Host": f"evil.example:{s.port}"}) == 403
+        assert status_of("POST", s.url + "/", {"Host": "evil.example"}, b"{}") == 403
+
+
+# Plan Step 1 — request-body size cap
+def test_body_cap():
+    import http.client
+
+    import server
+
+    with InProcess() as s:
+        c = http.client.HTTPConnection("127.0.0.1", s.port, timeout=5)
+        c.putrequest("POST", "/api/ingest")
+        c.putheader("Content-Length", str(server.MAX_BODY + 1))
+        c.endheaders()  # body never sent: the server must refuse on the header alone
+        assert c.getresponse().status == 413
+
+
+# AC62 — course identifiers normalize to `SUBJECT NNNN`
+def test_course_key():
+    import server
+
+    cases = {
+        "PHYSICS_1C03_schmim10_2269": "PHYSICS 1C03",  # Avenue Code
+        "MATH 1ZA3 - Fall 2026": "MATH 1ZA3",  # Crowdmark name: first two words
+        "Math 1B03 F26": "MATH 1B03",  # childsmath
+        "Math 1A03/1ZA3": "MATH 1A03",  # joint label: first code
+    }
+    got = {s: server.course_key(s) for s in cases}
+    assert got == cases, got
+
+
+# AC36 — title normalize: lowercase, course code removed, punctuation stripped (to a space), whitespace collapsed
+def test_norm_title():
+    import server
+
+    a = server.norm_title("MATH 1ZA3: Assignment  #2", "MATH 1ZA3")
+    b = server.norm_title("assignment 2", "MATH 1ZA3")
+    assert a == b == "assignment 2", (a, b)
+    # Session default: punctuation becomes a space (not deleted)
+    c = server.norm_title("Lab-2", "MATH 1ZA3")
+    d = server.norm_title("Lab 2", "MATH 1ZA3")
+    assert c == d == "lab 2", (c, d)
+
+
+# AC11 — kind is the first keyword in order exam, midterm, test, quiz, lab, assignment, homework
+def test_kind_first_keyword():
+    import server
+
+    cases = {
+        "Lab Quiz 3": "quiz",
+        "Midterm Exam": "exam",
+        "Midterm 1": "midterm",
+        "Term Test 1": "test",
+        "Lab 4": "lab",
+        "Assignment #2": "assignment",
+        "Homework 5": "homework",
+    }
+    got = {t: server.kind(t) for t in cases}
+    assert got == cases, got
+
+
+# AC39 — no keyword gives `other`
+def test_kind_other():
+    import server
+
+    assert server.kind("Reading Response") == "other", server.kind("Reading Response")
+
+
+# AC46 — outline category names map to kinds; plurals count
+def test_kind_category_names():
+    import server
+
+    got = (server.kind("Assignments"), server.kind("Weekly Quizzes"))
+    assert got == ("assignment", "quiz"), got
+
+
+# AC80 — keywords match only at the start of a word
+def test_kind_word_start():
+    import server
+
+    got = (server.kind("Prelab 2"), server.kind("latest results"))
+    assert got == ("other", "other"), got
+
+
+# ---- Step 3: ingest, status, raw items ----------------------------------------
+
+FIELDS = ("course", "source", "source_id", "title", "kind", "due", "weight", "done", "mark", "out_of", "url")
+
+
+def call(s, method, path, body=None, token=True):
+    """JSON request to the in-process server. token=True sends the right X-Token, a str sends that, None sends none."""
+    headers = {"Content-Type": "application/json"}
+    if token is True:
+        headers["X-Token"] = s.token
+    elif token is not None:
+        headers["X-Token"] = token
+    data = None if body is None else json.dumps(body).encode()
+    try:
+        with urllib.request.urlopen(urllib.request.Request(s.url + path, data, headers, method=method)) as r:
+            return r.status, json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        return e.code, None
+
+
+def ingest(s, source, items, status="ok", token=True, **extra):
+    code, _ = call(s, "POST", "/api/ingest", {"source": source, "items": items, "status": status, **extra}, token)
+    return code
+
+
+def ingest_ok(s, source, items, status="ok", **extra):
+    code = ingest(s, source, items, status, **extra)
+    assert 200 <= code < 300, f"POST /api/ingest -> {code}"
+
+
+def get_items(s):
+    code, body = call(s, "GET", "/api/items")
+    assert code == 200, f"GET /api/items -> {code}"
+    return body["items"]
+
+
+def get_status(s):
+    code, body = call(s, "GET", "/api/status")
+    assert code == 200, f"GET /api/status -> {code}"
+    return body if isinstance(body, dict) else {row["source"]: row for row in body}
+
+
+def db_dump(s):
+    with sqlite3.connect(s.db) as c:
+        return list(c.iterdump())
+
+
+def item(sid, **kw):
+    return {"course": "MATH 1ZA3", "source_id": sid, "title": f"Assignment {sid}", "due": "2026-10-20T23:59:00Z", **kw}
+
+
+def by_sid(items, source):
+    return {i["source_id"]: i for i in items if i["source"] == source}
+
+
+# AC4 — no X-Token: 401 and nothing stored or changed
+def test_ingest_no_token():
+    with InProcess() as s:
+        before = db_dump(s)
+        code = ingest(s, "avenue", [item("1")], token=None)
+        assert code == 401, f"unauthorized ingest -> {code}"
+        assert db_dump(s) == before, "DB changed on an unauthorized ingest"
+        ingest_ok(s, "avenue", [item("1", mark=5)])
+        before = db_dump(s)
+        code = ingest(s, "avenue", [item("1", mark=9), item("2")], status="error", error="x", token=None)
+        assert code == 401, f"unauthorized ingest -> {code}"
+        assert db_dump(s) == before, "DB changed on an unauthorized ingest"
+
+
+# AC4 — wrong X-Token: 401 and nothing stored or changed
+def test_ingest_bad_token():
+    with InProcess() as s:
+        before = db_dump(s)
+        code = ingest(s, "avenue", [item("1")], token="wrong")
+        assert code == 401, f"unauthorized ingest -> {code}"
+        assert db_dump(s) == before, "DB changed on an unauthorized ingest"
+        ingest_ok(s, "avenue", [item("1", mark=5)])
+        before = db_dump(s)
+        code = ingest(s, "avenue", [item("1", mark=9), item("2")], status="error", error="x", token="wrong")
+        assert code == 401, f"unauthorized ingest -> {code}"
+        assert db_dump(s) == before, "DB changed on an unauthorized ingest"
+
+
+# AC5 + AC3 — correct token: item stored with every field, status recorded
+def test_ingest_stores():
+    with InProcess() as s:
+        sent = item("42", title="Assignment 2", weight=5, done=True, mark=8, out_of=10, url="https://x/a2")
+        ingest_ok(s, "avenue", [sent])
+        items = get_items(s)
+        assert len(items) == 1, items
+        got = items[0]
+        missing = [f for f in FIELDS if f not in got]
+        assert not missing, f"fields missing from /api/items: {missing}"
+        assert (got["source"], got["source_id"], got["title"], got["course"]) == ("avenue", "42", "Assignment 2", "MATH 1ZA3"), got
+        assert (got["due"], got["weight"], bool(got["done"]), got["mark"], got["out_of"], got["url"]) == (
+            "2026-10-20T23:59:00Z", 5, True, 8, 10, "https://x/a2"), got
+        assert get_status(s)["avenue"]["status"] == "ok"
+
+
+# AC6 — same (source, source_id) updates in place
+def test_upsert_in_place():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("7", title="Assignment 7")])
+        first = get_items(s)
+        ingest_ok(s, "avenue", [item("7", title="Assignment 7 (revised)", mark=3)])
+        items = get_items(s)
+        assert len(items) == 1, items
+        assert items[0]["title"] == "Assignment 7 (revised)" and items[0]["mark"] == 3, items[0]
+        if "id" in first[0]:
+            assert items[0]["id"] == first[0]["id"], (first, items)
+
+
+# AC63 — every source's course identifier is stored under the one AC62 key
+def test_course_key_on_store():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1", course="PHYSICS_1C03_x_2269")])
+        ingest_ok(s, "childsmath", [item("a", course="Physics 1C03 F26")])
+        courses = {i["course"] for i in get_items(s)}
+        assert courses == {"PHYSICS 1C03"}, courses
+
+
+# AC11 + AC39 — kind is derived when an item is stored
+def test_kind_on_store():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1", title="Lab Quiz 3"), item("2", title="Reading Response")])
+        kinds = {i["source_id"]: i["kind"] for i in get_items(s)}
+        assert kinds == {"1": "quiz", "2": "other"}, kinds
+
+
+# AC12 — per-source status, error message, last-sync time
+def test_status():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1")])
+        ingest_ok(s, "crowdmark", [], status="login needed")
+        ingest_ok(s, "childsmath", [], status="error", error="boom: parse failed")
+        st = get_status(s)
+        assert {k: st[k]["status"] for k in ("avenue", "crowdmark", "childsmath")} == {
+            "avenue": "ok", "crowdmark": "login needed", "childsmath": "error"}, st
+        assert st["childsmath"]["error"] == "boom: parse failed", st["childsmath"]
+        for k in ("avenue", "crowdmark", "childsmath"):
+            assert st[k].get("synced_at"), f"no synced_at for {k}: {st[k]}"
+
+
+# AC43 — an ok ingest that omits a stored item keeps the row and flags it; other sources untouched
+def test_missing_flag():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1"), item("2")])
+        ingest_ok(s, "crowdmark", [item("c1")])
+        ingest_ok(s, "avenue", [item("1")])
+        items = get_items(s)
+        av, cm = by_sid(items, "avenue"), by_sid(items, "crowdmark")
+        assert set(av) == {"1", "2"}, "omitted row was deleted"
+        assert av["2"]["missing"] and not av["1"]["missing"], av
+        assert not cm["c1"]["missing"], cm
+
+
+# AC49 — login needed / error ingests neither set nor clear flags
+def test_missing_untouched_on_error():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1"), item("2")])
+        ingest_ok(s, "avenue", [item("1")], status="login needed")
+        ingest_ok(s, "avenue", [], status="error", error="x")
+        av = by_sid(get_items(s), "avenue")
+        assert not av["1"]["missing"] and not av["2"]["missing"], av
+        ingest_ok(s, "avenue", [item("1")])  # now 2 is flagged
+        ingest_ok(s, "avenue", [item("2")], status="error", error="x")
+        ingest_ok(s, "avenue", [], status="login needed")
+        av = by_sid(get_items(s), "avenue")
+        assert av["2"]["missing"] and not av["1"]["missing"], av
+
+
+# AC50 — reappearing item has its flag cleared
+def test_missing_cleared():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1"), item("2")])
+        ingest_ok(s, "avenue", [item("1")])
+        assert by_sid(get_items(s), "avenue")["2"]["missing"]
+        ingest_ok(s, "avenue", [item("1"), item("2")])
+        assert not by_sid(get_items(s), "avenue")["2"]["missing"]
+
+
+# AC76 (server side) — an ingest without a `mark` key leaves the stored mark alone
+def test_partial_upsert_keeps_mark():
+    with InProcess() as s:
+        ingest_ok(s, "childsmath", [item("t1", mark=12.5, out_of=15)])
+        ingest_ok(s, "childsmath", [item("t1", title="Test #1")])
+        got = by_sid(get_items(s), "childsmath")["t1"]
+        assert (got["mark"], got["out_of"], got["title"]) == (12.5, 15, "Test #1"), got
+
+
+
+# Plan Step 3 — a malformed ingest body is a 400 and writes nothing
+def test_ingest_bad_body():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1")])
+        before = db_dump(s)
+        for body in ([], {"source": "avenue", "items": [], "status": "weird"},
+                     {"source": "avenue", "items": [{"title": "no id"}], "status": "ok"},
+                     {"source": "avenue", "items": [item("1", mark={"x": 1})], "status": "ok"}):
+            code, _ = call(s, "POST", "/api/ingest", body)
+            assert code == 400, (body, code)
+        req = urllib.request.Request(s.url + "/api/ingest", b"{not json", {"X-Token": s.token}, method="POST")
+        assert status_of("POST", req.full_url, dict(req.headers), req.data) == 400
+        assert db_dump(s) == before, "DB changed on a malformed ingest"
+
+
+# ---- Step 4: overrides and cross-source dedup ---------------------------------
+
+def override(s, item_id, fields, ctype="application/json"):
+    """What the page does: no X-Token, JSON body of edited fields."""
+    req = urllib.request.Request(s.url + f"/api/items/{item_id}", json.dumps(fields).encode(),
+                                 {"Content-Type": ctype}, method="POST")
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def override_ok(s, item_id, fields):
+    code = override(s, item_id, fields)
+    assert 200 <= code < 300, f"POST /api/items/{item_id} -> {code}"
+
+
+def overrides_of(row):
+    o = row.get("overridden") or {}
+    return json.loads(o) if isinstance(o, str) else o
+
+
+def in_course(items, course):
+    return [i for i in items if i["course"] == course]
+
+
+# Same assessment as seen by two sources (AC7/AC36/AC62): titles and course ids differ in form only.
+AV = {"course": "MATH_1ZA3_x_2269", "source_id": "dropbox:1", "title": "MATH 1ZA3: Assignment  #2",
+      "due": "2026-10-20T23:59:00Z"}
+CM = {"course": "MATH 1ZA3 Fall 2026", "source_id": "cm-77", "title": "Assignment 2",
+      "due": "2026-10-21T03:59:00-04:00"}  # 8h after AV's due, other zone notation
+FAR = "2026-11-30T23:59:00Z"  # > 1 day from CM's due: keeps the rows apart until re-ingested
+
+
+# AC10 — override stores the values and records each in `overridden` with its edit time
+def test_override_recorded():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1", mark=5, out_of=10)])
+        rid = get_items(s)[0]["id"]
+        override_ok(s, rid, {"mark": 9, "title": "Assignment One"})
+        row = get_items(s)[0]
+        assert (row["mark"], row["title"]) == (9, "Assignment One"), row
+        o = overrides_of(row)
+        assert set(o) == {"mark", "title"}, o
+        assert o["mark"]["value"] == 9 and o["title"]["value"] == "Assignment One", o
+        for f in o:
+            datetime.fromisoformat(o[f]["at"])  # raises if the edit time is not an ISO time
+
+
+# AC9 — edited fields keep the user's value through a re-ingest; other fields take the ingest
+def test_override_survives_ingest():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1", mark=5, out_of=10)])
+        rid = get_items(s)[0]["id"]
+        override_ok(s, rid, {"mark": 9})
+        ingest_ok(s, "avenue", [item("1", mark=6, out_of=12, due="2026-10-22T23:59:00Z")])
+        row = get_items(s)[0]
+        assert (row["mark"], row["out_of"], row["due"]) == (9, 12, "2026-10-22T23:59:00Z"), row
+
+
+# Plan Step 4 — CSRF guard: a non-JSON content type is refused and stores nothing
+def test_override_rejects_non_json():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1", mark=5)])
+        rid = get_items(s)[0]["id"]
+        override_ok(s, rid, {"mark": 7})  # control: the same request as JSON is accepted
+        before = db_dump(s)
+        code = override(s, rid, {"mark": 9}, ctype="text/plain")
+        assert 400 <= code < 500, f"text/plain override -> {code}"
+        assert db_dump(s) == before, "DB changed on a non-JSON override"
+
+
+# Plan Step 4 — only title/kind/due/weight/done/mark/out_of can be overridden
+def test_override_whitelist():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1")])
+        rid = get_items(s)[0]["id"]
+        override_ok(s, rid, {"mark": 9})  # control: a whitelisted field is accepted
+        override(s, rid, {"source": "evil", "source_id": "x", "course": "EVIL 0000"})
+        row = get_items(s)[0]
+        assert (row["source"], row["source_id"], row["course"], row["mark"]) == ("avenue", "1", "MATH 1ZA3", 9), row
+        assert set(overrides_of(row)) == {"mark"}, overrides_of(row)
+
+
+# AC7 — Avenue + Crowdmark, same course and normalized title, dues <= 1 day apart: one row
+def test_dedup_merges():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [AV])
+        ingest_ok(s, "crowdmark", [CM])
+        rows = in_course(get_items(s), "MATH 1ZA3")
+        assert len(rows) == 1, rows
+
+
+# AC8 — same course and normalized title, dues > 1 day apart: two rows
+def test_dedup_far_dates():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [AV, dict(AV, source_id="dropbox:2", course="CHEM_1A03_x_2269", title="Assignment 2")])
+        ingest_ok(s, "crowdmark", [dict(CM, due="2026-10-25T23:59:00Z"), dict(CM, source_id="cm-88", course="CHEM 1A03 F26")])
+        items = get_items(s)
+        assert len(in_course(items, "CHEM 1A03")) == 1, "control pair (dues 8h apart) did not merge"
+        rows = in_course(items, "MATH 1ZA3")
+        assert len(rows) == 2, rows
+
+
+# AC37 — merge keeps the Avenue row and fills its empty fields from Crowdmark
+def test_merge_fills_empty():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [dict(AV, done=True)])
+        av_id = get_items(s)[0]["id"]
+        ingest_ok(s, "crowdmark", [dict(CM, mark=8, out_of=10, url="https://app.crowdmark.com/x", done=False)])
+        rows = in_course(get_items(s), "MATH 1ZA3")
+        assert len(rows) == 1, rows
+        r = rows[0]
+        assert (r["id"], r["source"], r["source_id"], r["title"], r["due"]) == (
+            av_id, "avenue", "dropbox:1", AV["title"], AV["due"]), r
+        assert (r["mark"], r["out_of"], r["url"]) == (8, 10, "https://app.crowdmark.com/x"), r
+        assert bool(r["done"]) is True, r
+
+
+def two_overridden_rows(s, av_fields, cm_fields):
+    """Ingest AV far from CM so both rows are visible, override each, then re-ingest AV so they merge."""
+    ingest_ok(s, "avenue", [dict(AV, due=FAR)])
+    ingest_ok(s, "crowdmark", [CM])
+    items = get_items(s)
+    override_ok(s, by_sid(items, "avenue")["dropbox:1"]["id"], av_fields)
+    time.sleep(1.1)  # distinct edit times even at one-second resolution
+    override_ok(s, by_sid(items, "crowdmark")["cm-77"]["id"], cm_fields)
+    ingest_ok(s, "avenue", [AV])
+    rows = in_course(get_items(s), "MATH 1ZA3")
+    assert len(rows) == 1, rows
+    return rows[0]
+
+
+# AC38 — overrides on different fields from both rows are all kept
+def test_merge_overrides_union():
+    with InProcess() as s:
+        r = two_overridden_rows(s, {"mark": 7}, {"weight": 15})
+        assert r["source"] == "avenue", r
+        assert (r["mark"], r["weight"]) == (7, 15), r
+        assert set(overrides_of(r)) >= {"mark", "weight"}, overrides_of(r)
+
+
+# AC48 — both rows override the same field: the later edit wins (here the Crowdmark one)
+def test_merge_override_later_wins():
+    with InProcess() as s:
+        r = two_overridden_rows(s, {"mark": 1}, {"mark": 2})
+        assert r["source"] == "avenue", r
+        assert r["mark"] == 2, r
+        assert overrides_of(r)["mark"]["value"] == 2, overrides_of(r)
+
+
+
+# Plan Step 4 — CSRF guard: a CORS preflight is never granted
+def test_no_cors_preflight():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1")])
+        rid = get_items(s)[0]["id"]
+        req = urllib.request.Request(s.url + f"/api/items/{rid}", method="OPTIONS", headers={
+            "Origin": "https://evil.example", "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type"})
+        try:
+            with urllib.request.urlopen(req) as r:
+                code, headers = r.status, r.headers
+        except urllib.error.HTTPError as e:
+            code, headers = e.code, e.headers
+        assert code >= 400, f"OPTIONS -> {code}"
+        allow = [h for h in headers if h.lower().startswith("access-control-")]
+        assert not allow, allow
+        assert override(s, 999, {"mark": 1}) == 404
+
+
+# ---- Step 5: outlines -----------------------------------------------------------
+
+OUTLINE_TEXT = """MATH 1ZA3 Course Outline
+Instructor office hours: Monday 2pm
+Assignments ...................... 20%
+Midterm Test ...... 30%
+Final Exam ......... 50%
+"""
+
+
+def tiny_pdf(lines):
+    """A one-page PDF whose text layer is `lines`, built by hand (no fixture files)."""
+    ops = "BT /F1 11 Tf 72 720 Td 14 TL " + " ".join(
+        "(" + ln.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") + ") '" for ln in lines) + " ET"
+    objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        f"<< /Length {len(ops)} >>\nstream\n{ops}\nendstream",
+    ]
+    out, offsets = b"%PDF-1.4\n", []
+    for n, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += f"{n} 0 obj\n{body}\nendobj\n".encode()
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    out += b"".join(f"{o:010d} 00000 n \n".encode() for o in offsets)
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return out
+
+
+def post_outline(s, course, body, ctype, token=True):
+    headers = {"Content-Type": ctype}
+    if token:
+        headers["X-Token"] = s.token
+    path = "/api/outline" + ("?course=" + urllib.parse.quote(course) if ctype == "application/pdf" else "")
+    data = body if isinstance(body, bytes) else json.dumps({"course": course, "categories": body}).encode()
+    return status_of("POST", s.url + path, headers, data)
+
+
+def post_outline_ok(s, course, body, ctype="application/json"):
+    code = post_outline(s, course, body, ctype)
+    assert 200 <= code < 300, f"POST /api/outline -> {code}"
+
+
+def course_weights(s, code):
+    with sqlite3.connect(s.db) as c:
+        row = c.execute("SELECT weights FROM courses WHERE code = ?", (code,)).fetchone()
+    assert row and row[0], f"no weights stored for {code}"
+    return json.loads(row[0])
+
+
+def cats(*rows):
+    return [{"name": n, "weights": list(w)} for n, *w in rows]
+
+
+class no_pypdf:
+    """server.pypdf raises if touched (AC64)."""
+
+    def __enter__(self):
+        import server
+
+        class Boom:
+            def __getattr__(self, name):
+                raise AssertionError(f"pypdf.{name} called on the JSON outline path")
+
+        self.server, self.old = server, server.__dict__.get("pypdf")
+        server.pypdf = Boom()
+
+    def __exit__(self, *exc):
+        if self.old is None:
+            del self.server.pypdf
+        else:
+            self.server.pypdf = self.old
+
+
+# AC14 — `<Name> ... NN%` lines give category -> NN; other lines are ignored
+def test_outline_regex():
+    import server
+
+    got = server.parse_outline_text(OUTLINE_TEXT)
+    assert got == {"Assignments": 20, "Midterm Test": 30, "Final Exam": 50}, got
+    # Session default: the separator is any run of dots, spaces or tabs
+    got = server.parse_outline_text("Final Exam 50%\nLabs\t15%\nQuizzes . . 10%")
+    assert got == {"Final Exam": 50, "Labs": 15, "Quizzes": 10}, got
+
+
+# AC57 (parse side) — a range takes its upper bound and is flagged approximate
+def test_pct_range():
+    import server
+
+    assert server.parse_pct("40-55%") == (55, True), server.parse_pct("40-55%")
+    assert server.parse_pct("20%") == (20, False), server.parse_pct("20%")
+
+
+# AC58 — footnote markers are stripped before parsing
+def test_pct_footnote():
+    import server
+
+    assert server.parse_pct("0-5%**") == server.parse_pct("0-5%") == (5, True), server.parse_pct("0-5%**")
+    assert server.parse_pct("10%*") == (10, False), server.parse_pct("10%*")
+
+
+# AC15 — a PDF outline is read with pypdf and its weights stored on the course
+def test_outline_pdf():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", tiny_pdf(OUTLINE_TEXT.splitlines()), "application/pdf")
+        w = course_weights(s, "MATH 1ZA3")
+        assert w["schemes"] == [{"Assignments": 20, "Midterm Test": 30, "Final Exam": 50}], w
+
+
+# Plan Step 5 — unreadable PDF bytes are a 400 and store nothing
+def test_outline_bad_pdf():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "100%")))  # control: route exists
+        before = db_dump(s)
+        code = post_outline(s, "MATH 1ZA3", b"%PDF-1.4 not really a pdf", "application/pdf")
+        assert code == 400, f"bad PDF -> {code}"
+        assert db_dump(s) == before, "DB changed on a bad PDF"
+
+
+# Plan Step 5 (Ambiguity 5) — the outline route needs X-Token
+def test_outline_needs_token():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "100%")))  # control: with token it works
+        before = db_dump(s)
+        code = post_outline(s, "MATH 1ZA3", cats(("Assignments", "50%")), "application/json", token=False)
+        assert code == 401, f"outline without token -> {code}"
+        assert db_dump(s) == before, "DB changed on an unauthorized outline"
+
+
+# AC64 + AC54 (server side) — JSON {course, categories} stored without pypdf, under the AC62 course key
+def test_outline_json():
+    with InProcess() as s, no_pypdf():
+        post_outline_ok(s, "MATH_1ZA3_x_2269", cats(("Assignments", "20%"), ("Final Exam", "80%")))
+        w = course_weights(s, "MATH 1ZA3")
+        assert w["schemes"] == [{"Assignments": 20, "Final Exam": 80}], w
+        assert not w.get("approximate"), w
+
+
+# AC55 — `Term Test 1 | 10% | 15%` gives 10 in scheme 1 and 15 in scheme 2
+def test_outline_two_schemes():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Term Test 1", "10%", "15%"), ("Final Exam", "90%", "85%")))
+        w = course_weights(s, "MATH 1ZA3")
+        assert w["schemes"] == [{"Term Test 1": 10, "Final Exam": 90}, {"Term Test 1": 15, "Final Exam": 85}], w
+
+
+# AC57 + AC58 (stored) — a range stores its upper bound and marks the course approximate; footnotes ignored
+def test_outline_range_approximate():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Final Exam", "40-55%"), ("Bonus", "0-5%**"), ("Assignments", "40%")))
+        w = course_weights(s, "MATH 1ZA3")
+        assert w["schemes"] == [{"Final Exam": 55, "Bonus": 5, "Assignments": 40}], w
+        assert w["approximate"] is True, w
+
+
+# AC47 — a category matching no kind gets exactly one placeholder item; weights still add up
+def test_placeholder_once():
+    with InProcess() as s:
+        outline = cats(("Assignments", "90%"), ("Participation", "10%"))
+        post_outline_ok(s, "MATH 1ZA3", outline)
+        post_outline_ok(s, "MATH 1ZA3", outline)
+        rows = [i for i in in_course(get_items(s), "MATH 1ZA3") if i["title"] == "Participation"]
+        assert len(rows) == 1, rows
+        assert (rows[0]["weight"], rows[0]["due"], rows[0]["kind"]) == (10, None, "other"), rows[0]
+        assert not [i for i in get_items(s) if i["title"] == "Assignments"], "placeholder made for a kind-matching category"
+        assert sum(course_weights(s, "MATH 1ZA3")["schemes"][0].values()) == 100
+
+
+# AC72 (server side) — ingest category_marks are stored per course, keyed by normalized name
+def test_category_mark_stored():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1")], category_marks=[
+            {"course": "MATH_1ZA3_x_2269", "name": "Online Homework", "value": 87.5}])
+        w = course_weights(s, "MATH 1ZA3")
+        assert w["category_marks"] == {"online homework": 87.5}, w
+
+
+# ---- Step 6: item weights and course grades -------------------------------------
+
+def get_courses(s):
+    code, body = call(s, "GET", "/api/items")
+    assert code == 200, f"GET /api/items -> {code}"
+    return body["courses"]
+
+
+def near(a, b):
+    return a is not None and abs(a - b) < 1e-6
+
+
+# Assignments 20 / Midterm Test 30 / Final Exam 50 (the AC14 outline)
+GRADED = [item("a1", title="Assignment 1", mark=8, out_of=10),
+          item("a2", title="Assignment 2", mark=6, out_of=10),
+          item("mt", title="Midterm", mark=15, out_of=20),
+          item("fx", title="Final Exam")]
+
+
+def graded_course(s):
+    post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "20%"), ("Midterm Test", "30%"), ("Final Exam", "50%")))
+    ingest_ok(s, "avenue", GRADED)
+
+
+# AC40 — category weight W over N matching items gives W/N each
+def test_item_weight_split():
+    with InProcess() as s:
+        graded_course(s)
+        w = {sid: i["weight"] for sid, i in by_sid(get_items(s), "avenue").items()}
+        assert all(near(w[k], v) for k, v in {"a1": 10, "a2": 10, "mt": 30, "fx": 50}.items()), w
+
+
+# AC52 — an ingested (gradebook) Weight is ignored; the outline weight is used
+def test_gradebook_weight_ignored():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "20%"), ("Final Exam", "80%")))
+        ingest_ok(s, "avenue", [item("grade:1", title="Assignment 1", weight=99), item("grade:2", title="Assignment 2", weight=1)])
+        w = {sid: i["weight"] for sid, i in by_sid(get_items(s), "avenue").items()}
+        assert near(w["grade:1"], 10) and near(w["grade:2"], 10), w
+
+
+# Plan Step 6 — a user weight override wins over the derived weight
+def test_weight_override_wins():
+    with InProcess() as s:
+        graded_course(s)
+        override_ok(s, by_sid(get_items(s), "avenue")["a1"]["id"], {"weight": 12})
+        w = {sid: i["weight"] for sid, i in by_sid(get_items(s), "avenue").items()}
+        assert near(w["a1"], 12) and near(w["a2"], 10), w
+
+
+# AC29 — course summary: weighted mark over graded items, and % of course weight graded
+def test_grade_basic():
+    with InProcess() as s:
+        graded_course(s)
+        c = get_courses(s)["MATH 1ZA3"]
+        # (10*.8 + 10*.6 + 30*.75) / 50 = 73 ; graded 50 of 100
+        assert near(c["grade"], 73) and near(c["graded_pct"], 50), c
+        assert c["approximate"] is False, c
+
+
+# AC56 — several schemes: computed under each, the higher one shown
+def test_grade_two_schemes():
+    with InProcess() as s:
+        two = cats(("Assignments", "20%", "40%"), ("Final Exam", "80%", "60%"))
+        post_outline_ok(s, "MATH 1ZA3", two)
+        post_outline_ok(s, "CHEM 1A03", two)
+        ingest_ok(s, "avenue", [
+            item("m-a", title="Assignment 1", mark=10, out_of=10), item("m-x", title="Final Exam", mark=50, out_of=100),
+            item("c-a", course="CHEM 1A03", title="Assignment 1", mark=0, out_of=10),
+            item("c-x", course="CHEM 1A03", title="Final Exam", mark=100, out_of=100)])
+        c = get_courses(s)
+        assert near(c["MATH 1ZA3"]["grade"], 70), c  # s1 60, s2 70
+        assert near(c["CHEM 1A03"]["grade"], 80), c  # s1 80, s2 60
+        assert near(by_sid(get_items(s), "avenue")["m-a"]["weight"], 20), "item weight is not scheme 1"
+
+
+# AC57 (server) — a range-derived weight marks the course grade approximate
+def test_grade_approximate():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "45-60%"), ("Final Exam", "40%")))
+        post_outline_ok(s, "CHEM 1A03", cats(("Assignments", "60%"), ("Final Exam", "40%")))
+        ingest_ok(s, "avenue", [item("m", title="Assignment 1", mark=5, out_of=10),
+                                item("c", course="CHEM 1A03", title="Assignment 1", mark=5, out_of=10)])
+        c = get_courses(s)
+        assert (c["MATH 1ZA3"]["approximate"], c["CHEM 1A03"]["approximate"]) == (True, False), c
+
+
+def homework_course(s, items):
+    post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "90%"), ("Online Homework", "10%")))
+    ingest_ok(s, "avenue", [item("a1", title="Assignment 1", mark=9, out_of=10), *items],
+              category_marks=[{"course": "MATH 1ZA3", "name": "Online Homework", "value": 80}])
+
+
+# AC73 — category mark with no item marks counts for the whole category weight
+def test_category_mark_used():
+    with InProcess() as s:
+        homework_course(s, [])
+        c = get_courses(s)["MATH 1ZA3"]
+        # (90*.9 + 10*.8) / 100
+        assert near(c["grade"], 89) and near(c["graded_pct"], 100), c
+
+
+# AC74 — any item mark in the category: the category mark is ignored
+def test_category_mark_ignored():
+    with InProcess() as s:
+        homework_course(s, [item("h1", title="Homework 1", mark=5, out_of=10), item("h2", title="Homework 2")])
+        c = get_courses(s)["MATH 1ZA3"]
+        # items 5 + 5 weight; graded: 90*.9 + 5*.5 = 83.5 over 95
+        assert near(c["grade"], 83.5 / 95 * 100) and near(c["graded_pct"], 95), c
+
+
+# Session default — re-posting an outline without a category removes its placeholder unless overridden
+def test_placeholder_removed_on_repost():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "80%"), ("Participation", "10%"), ("Attendance", "10%")))
+        att = [i for i in get_items(s) if i["title"] == "Attendance"]
+        assert len(att) == 1, att
+        override_ok(s, att[0]["id"], {"mark": 9})
+        post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "100%")))
+        titles = [i["title"] for i in in_course(get_items(s), "MATH 1ZA3")]
+        assert "Participation" not in titles, titles
+        assert titles.count("Attendance") == 1, titles
+
+
+
+# Session default — nothing graded yet: grade None, graded_pct 0
+def test_grade_nothing_graded():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "40%"), ("Final Exam", "60%")))
+        ingest_ok(s, "avenue", [item("a1", title="Assignment 1")])
+        c = get_courses(s)["MATH 1ZA3"]
+        assert c["grade"] is None and c["graded_pct"] == 0, c
+
+
+
+# Session default — a placeholder gives way to a real item of the same `other` category
+def test_placeholder_gives_way():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "90%"), ("Participation", "10%")))
+        ingest_ok(s, "avenue", [item("p", title="Participation", mark=9, out_of=10)])
+        av = by_sid(get_items(s), "avenue")["p"]
+        assert near(av["weight"], 10), av
+        c = get_courses(s)["MATH 1ZA3"]
+        assert near(c["grade"], 90) and near(c["graded_pct"], 10), c
+
+
+# ---- Step 7: extension parse.js (node) -------------------------------------------
+
+# AC25, AC59, AC60, AC69, AC70, AC71, AC76, AC77 — see test_extension.js
+def test_extension_js():
+    node = shutil.which("node")
+    assert node, "node not found on PATH (needed for test_extension.js)"
+    r = subprocess.run([node, "test_extension.js"], cwd=ROOT, capture_output=True, text=True)
+    assert r.returncode == 0, (r.stdout + r.stderr).strip()[-2000:]
+
+
+if __name__ == "__main__":
+    failed = 0
+    for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:
+        try:
+            fn()
+            print(f"ok   {name}")
+        except Exception as e:
+            failed += 1
+            print(f"FAIL {name}: {type(e).__name__}: {e}")
+            if "-v" in sys.argv:
+                traceback.print_exc()
+    sys.exit(1 if failed else 0)
