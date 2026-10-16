@@ -194,7 +194,7 @@ async function sync() {
   if (!needed.length) return;
   await renewalReady;
   await renewAll(needed, renewal, RENEW);
-  await browser.storage.session.set({ fallback: renewal.fallback, skipped: renewal.skipped });
+  await saveRenewal();
 }
 
 browser.action.onClicked.addListener(() => sync());
@@ -209,6 +209,14 @@ const RENEW_TIMEOUT_MS = 45 * 1000;
 const renewal = { fallback: {}, skipped: [], busy: false };
 const renewalReady = browser.storage.session.get({ fallback: {}, skipped: [] }).then((s) => Object.assign(renewal, s));
 const watching = {}; // renewal tab id -> { source, resolve }; lost with the page, the next sync retries
+const signingIn = new Set(); // sources whose fallback sign-in re-sync is running (one per sign-in)
+
+function saveRenewal() {
+  return browser.storage.session.set({ fallback: renewal.fallback, skipped: renewal.skipped });
+}
+
+// Fallback tab id -> its source, or undefined.
+const fallbackSource = (tabId) => Object.keys(renewal.fallback).find((s) => renewal.fallback[s] === tabId);
 
 // AC22/AC23/AC25: a static entry, or the Crowdmark entry avenue() discovered (AC24).
 async function entry(source) {
@@ -249,13 +257,47 @@ const RENEW = {
   entry,
   open: openRenewalTab,
   rerun,
-  // ponytail: Step 5 replaces this stub with browser.notifications
-  notify: async (sources) => console.warn(`MacTracker: sign-in needed: ${sources.join(', ')}`),
+  // AC10/AC11: one notification per sync, replaced by the next; source names only (AC19).
+  notify: (sources) => browser.notifications.create('mactracker-login', {
+    type: 'basic', title: 'MacTracker: sign-in needed', message: sources.join(', '),
+  }),
 };
 
-browser.tabs.onUpdated.addListener((tabId, change) => {
+browser.tabs.onUpdated.addListener(async (tabId, change) => {
+  if (!change.url) return;
   const w = watching[tabId];
-  if (w && change.url && loggedInUrl(w.source, change.url)) endRenewal(tabId, { ok: true });
+  if (w && loggedInUrl(w.source, change.url)) return endRenewal(tabId, { ok: true });
+  // AC13/AC29: the student signed in through a fallback tab; the tab stays open, they are using it.
+  await renewalReady;
+  const source = fallbackSource(tabId);
+  if (!source || signingIn.has(source) || !loggedInUrl(source, change.url)) return;
+  signingIn.add(source);
+  try {
+    await fallbackSignedIn(source, renewal, RENEW);
+    await saveRenewal();
+  } finally {
+    signingIn.delete(source);
+  }
+});
+
+// AC12: only this click brings a tab to the front (AC14). Crowdmark with no fallback tab signs in through Avenue.
+browser.notifications.onClicked.addListener(async (id) => {
+  if (id !== 'mactracker-login') return;
+  await renewalReady;
+  const source = RENEW_ORDER.find((s) => s in renewal.fallback);
+  if (!source) return browser.tabs.create({ url: SITES.avenue.login, active: true });
+  const tab = await browser.tabs.update(renewal.fallback[source], { active: true });
+  await browser.windows.update(tab.windowId, { focused: true });
+});
+
+// AC15: a closed fallback tab is forgotten, so the next sync renews again; a closed renewal tab ends that renewal.
+browser.tabs.onRemoved.addListener(async (tabId) => {
+  endRenewal(tabId, { closed: true });
+  await renewalReady;
+  const source = fallbackSource(tabId);
+  if (!source) return;
+  delete renewal.fallback[source];
+  await saveRenewal();
 });
 browser.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name.startsWith('renew-')) endRenewal(Number(alarm.name.slice(6)), { tabId: Number(alarm.name.slice(6)) });

@@ -273,6 +273,7 @@ async function renewAll(sources, state, d) {
       if (!(await d.entry(source))) { affected.push(source); continue; } // Crowdmark not yet discovered: not an IdP failure
       const r = await d.open(source);
       if (r && r.ok) await d.rerun(source); // AC3; a rerun never renews again (AC5)
+      else if (r && r.closed) continue; // the student closed the renewal tab: no fallback, the next sync retries
       else { state.fallback[source] = r.tabId; affected.push(source); fellBack = true; } // AC10
     }
     state.skipped = skipped;

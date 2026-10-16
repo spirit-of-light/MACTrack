@@ -1503,6 +1503,70 @@ def test_renewal_keeps_no_secrets():
         assert not extra, f"storage.session.set stores other keys {extra}: {a}"
 
 
+# ---- Spec 0002 Step 5: fallback glue (static; the live run is manual in Zen) --------
+
+def _listener(src, event):
+    """Argument text of `browser.<event>.addListener(...)`, plus the bodies of named functions it calls (one level)."""
+    m = re.search(rf"browser\.{re.escape(event)}\.addListener\s*\(", src)
+    assert m, f"no browser.{event} listener"
+    args = call_args(src, m.end() - 1)
+    called = set(re.findall(r"\b([A-Za-z_]\w*)\s*\(", args)) | set(re.findall(r"^\(\s*([A-Za-z_]\w*)\s*\)$", args))
+    return args + "".join(_safe_body(src, n) or "" for n in sorted(called))
+
+
+# Spec 0002 AC10/AC11/AC19 — one browser notification names the sources; its text carries no URL
+def test_fallback_notification():
+    bg = ext("background.js")
+    calls = [call_args(bg, m.end() - 1) for m in re.finditer(r"notifications\.create\s*\(", bg)]
+    assert calls, "no notifications.create"
+    for a in calls:
+        assert re.match(r"\(\s*['\"`][\w-]+['\"`]\s*,", a), f"notification without a fixed id (one per sync, replaced): {a}"
+        assert not re.search(r"url|https?:|\bSITES\b|\.login\b|\bentry\s*\(", a, re.I), f"notification text may carry a URL: {a}"
+
+
+# Spec 0002 AC12/AC14 — only a notification click focuses the fallback tab (or opens Avenue's entry for Crowdmark)
+def test_notification_focuses_tab():
+    bg = ext("background.js")
+    body = _listener(bg, "notifications.onClicked")
+    upd = [call_args(body, m.end() - 1) for m in re.finditer(r"tabs\.update\s*\(", body)]
+    assert any(re.search(r"active\s*:\s*true\b", a) for a in upd), f"click does not make the fallback tab active: {upd}"
+    wins = [call_args(body, m.end() - 1) for m in re.finditer(r"windows\.update\s*\(", body)]
+    assert any(re.search(r"focused\s*:\s*true\b", a) for a in wins), "click does not focus the fallback tab's window"
+    creates = [call_args(body, m.end() - 1) for m in re.finditer(r"tabs\.create\s*\(", body)]
+    assert any(re.search(r"active\s*:\s*true\b", a) for a in creates), \
+        "click with no Crowdmark fallback tab does not open an active tab"
+    assert re.search(r"avenue", body), "Crowdmark click target is not Avenue's entry URL"
+    rest = bg
+    for m in re.finditer(r"browser\.notifications\.onClicked\.addListener\s*\(", bg):
+        rest = rest.replace(call_args(bg, m.end() - 1), "")
+    for n in set(re.findall(r"\b([A-Za-z_]\w*)\s*\(", _listener(bg, "notifications.onClicked"))):
+        b = _safe_body(bg, n)
+        if b and n not in ("sync", "renewAll", "fallbackSignedIn"):
+            rest = rest.replace(b, "")
+    for api, flag in (("tabs.update", "active"), ("windows.update", "focused"), ("tabs.create", "active")):
+        for m in re.finditer(rf"{re.escape(api)}\s*\(", rest):
+            a = call_args(rest, m.end() - 1)
+            assert not re.search(rf"{flag}\s*:\s*true\b", a), f"{api} with {flag}: true outside the notification click: {a}"
+
+
+# Spec 0002 AC13/AC29/AC30 — a tracked fallback tab reaching its logged-in URL re-syncs that source by itself
+def test_fallback_sign_in_resyncs():
+    bg = ext("background.js")
+    body = _listener(bg, "tabs.onUpdated")
+    assert re.search(r"\bloggedInUrl\s*\(", body), "tabs.onUpdated does not check loggedInUrl"
+    assert re.search(r"\bfallbackSignedIn\s*\(", body), "a fallback tab reaching its logged-in URL does not call fallbackSignedIn"
+
+
+# Spec 0002 AC15 (+ implementer gap) — closing a fallback tab forgets it; closing a renewal tab ends that renewal
+def test_fallback_tab_closed():
+    bg = ext("background.js")
+    body = _listener(bg, "tabs.onRemoved")
+    assert re.search(r"\bdelete\b[^;\n]*fallback|fallback[^;\n]*\bdelete\b", body), \
+        "a closed fallback tab is not removed from state.fallback"
+    assert re.search(r"storage\.session\.set\s*\(|\bsave\w*\s*\(", body), "the removed fallback entry is not saved"
+    assert re.search(r"renew", body, re.I), "a closed renewal tab does not end its renewal"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:

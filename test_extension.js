@@ -694,6 +694,16 @@ test('0002 session default: sign-in seen but re-sync not ok keeps the fallback t
   assert.deepEqual(state.skipped, ['crowdmark', 'childsmath']);
 });
 
+test('0002 renewal tab closed by the student: no fallback entry, no notification, later sources still renew', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ open: (s) => (s === 'avenue' ? { closed: true } : { ok: true }) });
+  await P.renewAll(['avenue', 'childsmath'], state, d);
+  assert.deepEqual(calls.open, ['avenue', 'childsmath']);
+  assert.deepEqual(state.fallback, {});
+  assert.deepEqual(calls.notify, []);
+  assert.deepEqual(calls.rerun, ['childsmath']);
+});
+
 test('0002 AC9 one source needs sign-in: the other two are posted ok with their items before syncAll resolves', async () => {
   const got = await runSync({
     avenue: async () => ({ items: [{ source_id: 'dropbox:1', title: 'A1' }], categoryMarks: [] }),
