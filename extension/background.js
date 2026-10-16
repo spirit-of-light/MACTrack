@@ -97,9 +97,8 @@ function topics(modules) {
 }
 
 // AC16/AC54: the course outline topic, as a PDF file or a Simple Syllabus LTI link.
-async function outline(ou, code) {
-  const toc = await json(`${AVENUE}/d2l/api/le/1.75/${ou}/content/toc`);
-  const topic = topics(toc.Modules).find((t) => /outline|syllabus/i.test(t.Title || ''));
+async function outline(tocTopics, code) {
+  const topic = tocTopics.find((t) => /outline|syllabus/i.test(t.Title || ''));
   if (!topic || !topic.Url) return;
   if (topic.TypeIdentifier === 'File') {
     const bytes = await (await get(new URL(topic.Url, AVENUE).href)).arrayBuffer();
@@ -114,6 +113,7 @@ async function avenue() {
   const items = [];
   const categoryMarks = [];
   const courseInfo = [];
+  let cmEntry = null;
   for (const c of Courses.filter((x) => x.IsActive)) { // AC53
     const api = `${AVENUE}/d2l/api/le/1.45/${c.OrgUnitId}`;
     const folders = await optional(`${api}/dropbox/folders/`, []);
@@ -132,9 +132,17 @@ async function avenue() {
     // A bare {course} entry tells the server this course was synced, so its old marks/info are replaced.
     categoryMarks.push({ course: c.Code }, ...r.categoryMarks.map((m) => ({ ...m, course: c.Code })));
     courseInfo.push({ course: c.Code }, ...r.courseInfo.map((i) => ({ ...i, course: c.Code })));
-    // An outline failure is logged but never costs the course's items.
-    await outline(c.OrgUnitId, c.Code).catch((e) => console.error(`MacTracker: outline for ${c.Code}:`, e));
+    // A content or outline failure is logged but never costs the course's items.
+    let tocTopics = [];
+    try {
+      tocTopics = topics((await json(`${AVENUE}/d2l/api/le/1.75/${c.OrgUnitId}/content/toc`)).Modules);
+    } catch (e) {
+      console.error(`MacTracker: content for ${c.Code}:`, e);
+    }
+    cmEntry = cmEntry || crowdmarkEntry(tocTopics); // spec 0002 AC24: first hit wins
+    await outline(tocTopics, c.Code).catch((e) => console.error(`MacTracker: outline for ${c.Code}:`, e));
   }
+  if (cmEntry) await browser.storage.session.set({ crowdmarkEntry: cmEntry });
   return { items, categoryMarks, courseInfo };
 }
 
@@ -175,12 +183,80 @@ async function childsmath() {
 }
 
 // AC18/AC19/AC20/AC45: every run starts at once and syncs all sources independently.
+// Spec 0002 AC1/AC2/AC9: every source is posted first; then the `login needed` ones are renewed.
 async function sync() {
-  const results = await syncAll({ avenue, crowdmark, childsmath }, (body) => post('/api/ingest', body));
+  const needed = [];
+  const results = await syncAll(FETCHERS, (body) => {
+    if (body.status === 'login needed') needed.push(body.source);
+    return post('/api/ingest', body);
+  });
   for (const r of results) if (r.status === 'rejected') console.error('MacTracker: sync post failed:', r.reason);
+  if (!needed.length) return;
+  await renewalReady;
+  await renewAll(needed, renewal, RENEW);
+  await browser.storage.session.set({ fallback: renewal.fallback, skipped: renewal.skipped });
 }
 
 browser.action.onClicked.addListener(() => sync());
 // Created once: re-creating it on every background start would push the next sync back.
 browser.alarms.get('sync').then((a) => a || browser.alarms.create('sync', { periodInMinutes: 180 }));
 browser.alarms.onAlarm.addListener((alarm) => alarm.name === 'sync' && sync());
+
+// ---- Spec 0002 session renewal (plan 0002 Step 4) ---------------------------------
+const FETCHERS = { avenue, crowdmark, childsmath };
+const RENEW_TIMEOUT_MS = 45 * 1000;
+// AC27: only tab ids and source names are stored; `busy` stays in memory, so a suspended page never sticks.
+const renewal = { fallback: {}, skipped: [], busy: false };
+const renewalReady = browser.storage.session.get({ fallback: {}, skipped: [] }).then((s) => Object.assign(renewal, s));
+const watching = {}; // renewal tab id -> { source, resolve }; lost with the page, the next sync retries
+
+// AC22/AC23/AC25: a static entry, or the Crowdmark entry avenue() discovered (AC24).
+async function entry(source) {
+  if (source !== 'crowdmark') return SITES[source].login;
+  return (await browser.storage.session.get('crowdmarkEntry')).crowdmarkEntry || null;
+}
+
+// AC2/AC3/AC10: an inactive tab on the entry URL; {ok:true} once it reaches a logged-in URL, else {tabId} after 45 s.
+async function openRenewalTab(source) {
+  const tab = await browser.tabs.create({ url: await entry(source), active: false });
+  return new Promise((resolve) => {
+    watching[tab.id] = { source, resolve };
+    browser.alarms.create(`renew-${tab.id}`, { when: Date.now() + RENEW_TIMEOUT_MS });
+  });
+}
+
+function endRenewal(tabId, result) {
+  const w = watching[tabId];
+  if (!w) return;
+  delete watching[tabId];
+  browser.alarms.clear(`renew-${tabId}`);
+  if (result.ok) browser.tabs.remove(tabId);
+  w.resolve(result);
+}
+
+// AC3/AC4: sync one source again; its posted status decides what renewal does next.
+async function rerun(source) {
+  let status = 'error';
+  await syncAll({ [source]: FETCHERS[source] }, (body) => {
+    status = body.status;
+    return post('/api/ingest', body);
+  });
+  return status;
+}
+
+const RENEW = {
+  now: () => new Date(),
+  entry,
+  open: openRenewalTab,
+  rerun,
+  // ponytail: Step 5 replaces this stub with browser.notifications
+  notify: async (sources) => console.warn(`MacTracker: sign-in needed: ${sources.join(', ')}`),
+};
+
+browser.tabs.onUpdated.addListener((tabId, change) => {
+  const w = watching[tabId];
+  if (w && change.url && loggedInUrl(w.source, change.url)) endRenewal(tabId, { ok: true });
+});
+browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name.startsWith('renew-')) endRenewal(Number(alarm.name.slice(6)), { tabId: Number(alarm.name.slice(6)) });
+});

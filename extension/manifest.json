@@ -8,7 +8,7 @@
   "background": { "scripts": ["parse.js", "background.js"] },
   "action": { "default_title": "Sync MacTracker" },
   "options_ui": { "page": "options.html" },
-  "permissions": ["alarms", "storage"],
+  "permissions": ["alarms", "storage", "notifications", "tabs"],
   "host_permissions": [
     "https://avenue.cllmcmaster.ca/*",
     "https://mcmaster.simplesyllabusca.com/*",

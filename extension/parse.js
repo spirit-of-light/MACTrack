@@ -268,7 +268,9 @@ async function renewAll(sources, state, d) {
       if (source in state.fallback) continue; // AC14: its fallback tab is still open
       if (quietHour(d.now())) continue; // AC6: checked when this renewal would start
       if (fellBack) { skipped.push(source); affected.push(source); continue; } // AC11
-      if (!d.entry(source)) { affected.push(source); continue; } // Crowdmark not yet discovered: not an IdP failure
+      // AC30: Crowdmark signs in through Avenue; retried once Avenue's fallback sign-in succeeds
+      if (source === 'crowdmark' && 'avenue' in state.fallback) { skipped.push(source); continue; }
+      if (!(await d.entry(source))) { affected.push(source); continue; } // Crowdmark not yet discovered: not an IdP failure
       const r = await d.open(source);
       if (r && r.ok) await d.rerun(source); // AC3; a rerun never renews again (AC5)
       else { state.fallback[source] = r.tabId; affected.push(source); fellBack = true; } // AC10

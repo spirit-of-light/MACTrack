@@ -645,6 +645,16 @@ test('0002 AC14 an older fallback tab for one source does not block renewal of a
   assert.deepEqual(calls.open, ['childsmath']);
 });
 
+test('0002 AC26 Avenue fallback tab open: no Crowdmark tab; Avenue sign-in then renews Crowdmark', async () => {
+  const state = newState();
+  state.fallback.avenue = 7;
+  const { d, calls } = fakeBrowser();
+  await P.renewAll(['crowdmark'], state, d);
+  assert.deepEqual(calls.open, [], 'Crowdmark renewal started without a valid Avenue session');
+  await P.fallbackSignedIn('avenue', state, d);
+  assert.deepEqual(calls.open, ['crowdmark']);
+});
+
 test('0002 AC15 fallback tab closed without sign-in: the next sync tries renewal again', async () => {
   const state = newState();
   const { d, calls } = fakeBrowser({ open: () => ({ tabId: 7 }) });

@@ -1071,6 +1071,12 @@ def test_manifest():
     assert "cookies" not in m["permissions"], m["permissions"]
     for host in HOSTS:
         assert any(host in p for p in m["host_permissions"]), f"no host permission for {host}"
+    # Spec 0002 AC17/AC18/AC20: renewal adds notifications + tabs only; no content scripts, no IdP hosts
+    assert set(m["permissions"]) == {"alarms", "storage", "notifications", "tabs"}, m["permissions"]
+    assert "content_scripts" not in m, m.get("content_scripts")
+    idp = [p for p in m["host_permissions"] + m.get("optional_host_permissions", [])
+           if "cap.mcmaster.ca" in p or "microsoftonline" in p]
+    assert not idp, f"IdP host permission: {idp}"
     assert "action" in m, "no toolbar button (manifest `action`)"
     assert "default_popup" not in m["action"], m["action"]
     page = m["options_ui"]["page"]
@@ -1398,6 +1404,103 @@ def test_alarm_created_once():
     create = bg.index("browser.alarms.create(")
     before = bg[max(0, create - 200):create]
     assert re.search(r"onInstalled|alarms\.get\(", before), "alarm re-created on every background start"
+
+
+# ---- Spec 0002 Step 4: renewal glue (static; the live run is manual in Zen) ---------
+
+def _listeners(src):
+    return [call_args(src, m.end() - 1) for m in re.finditer(r"\.addListener\s*\(", src)]
+
+
+def _object_keys(arg):
+    """Top-level keys of the object literal in a call's argument text `({a: 1, b})`, or None if not a literal."""
+    inner = arg.strip()[1:-1].strip()
+    if not inner.startswith("{"):
+        return None
+    body, depth, top = inner[1:inner.rindex("}")], 0, ""
+    for ch in body:
+        depth += {"{": 1, "[": 1, "(": 1, "}": -1, "]": -1, ")": -1}.get(ch, 0)
+        top += ch if depth == 0 or ch in "{[(" and depth == 1 else ""
+    return [k.strip().strip("'\"[]") for k in re.findall(r"(?:^|,)\s*([\w'\"\[\]]+)\s*(?=:|,|$)", top)]
+
+
+# Spec 0002 AC2 — the renewal tab opens inactive, so the student's tab stays active
+def test_renew_tab_inactive():
+    bg = ext("background.js")
+    assert re.search(r"tabs\.create\s*\(", bg), "no tabs.create"
+    body = js_function(bg, "openRenewalTab")
+    creates = [call_args(body, m.end() - 1) for m in re.finditer(r"tabs\.create\s*\(", body)]
+    assert creates, "openRenewalTab() does not call tabs.create"
+    assert all(re.search(r"active\s*:\s*false\b", a) for a in creates), f"renewal tab not inactive: {creates}"
+
+
+# Spec 0002 AC3/AC10 — the tab is watched for a logged-in URL and closed; a one-shot alarm gives the 45 s timeout
+def test_renewal_tab_watch():
+    bg = ext("background.js")
+    assert re.search(r"browser\.tabs\.onUpdated\.addListener\s*\(", bg), "no tabs.onUpdated listener"
+    assert re.search(r"\bloggedInUrl\s*\(", bg), "background.js never calls loggedInUrl"
+    assert re.search(r"tabs\.remove\s*\(", bg), "a renewed tab is never closed (no tabs.remove)"
+    alarms = [call_args(bg, m.end() - 1) for m in re.finditer(r"alarms\.create\s*\(", bg)]
+    one_shot = [a for a in alarms if "periodInMinutes" not in a and re.search(r"\bwhen\b|\bdelayInMinutes\b", a)]
+    assert one_shot, f"no one-shot browser.alarms timer: {alarms}"
+    secs45 = r"45\s*\*\s*1000|45_?000|0\.75|45\s*/\s*60"
+    assert any(re.search(secs45, a) for a in one_shot) or re.search(rf"=\s*(?:{secs45})\b", bg), \
+        f"renewal timeout is not 45 s: {one_shot}"
+
+
+# Spec 0002 AC1/AC2/AC9 — sync() posts every source first, then renews the `login needed` ones, with state in storage.session
+def test_sync_renews_after_posting():
+    bg = ext("background.js")
+    body = js_function(bg, "sync")
+    assert "syncAll(" in body, "sync() no longer calls syncAll"
+    assert re.search(r"\brenewAll\s*\(", body), "sync() does not call renewAll"
+    assert body.index("syncAll(") < re.search(r"\brenewAll\s*\(", body).start(), "renewAll runs before syncAll posts"
+    assert "login needed" in body, "sync() does not pick the `login needed` sources"
+    assert re.search(r"storage\.session\.get\s*\(", bg), "renewal state is not read from browser.storage.session"
+
+
+# Spec 0002 AC24 — avenue() finds the Crowdmark entry URL and keeps it in storage.session
+def test_avenue_records_crowdmark_entry():
+    bg = ext("background.js")
+    assert re.search(r"\bcrowdmarkEntry\s*\(", js_function(bg, "avenue")), "avenue() does not call crowdmarkEntry"
+    sets = [call_args(bg, m.end() - 1) for m in re.finditer(r"storage\.session\.set\s*\(", bg)]
+    keys = [k for a in sets for k in (_object_keys(a) or [])]
+    assert any("crowdmark" in k.lower() for k in keys), f"no Crowdmark entry URL key in storage.session.set: {keys}"
+
+
+# Spec 0002 AC18 — nothing is injected into any page
+def test_no_injection():
+    for f in EXT.iterdir():
+        text = f.read_text()
+        for word in ("executeScript", "insertCSS", "registerContentScripts", "content_scripts"):
+            assert word not in text, f"`{word}` in extension/{f.name}"
+        assert not re.search(r"\bscripting\b", text), f"`scripting` in extension/{f.name}"
+
+
+# Spec 0002 AC20 — the extension never fetches an IdP or a login entry URL itself; sign-in happens only in a tab
+def test_no_idp_fetch():
+    bg = ext("background.js")
+    for a in fetch_calls(bg):
+        for bad in ("cap.mcmaster", "microsoftonline", "avenue.mcmaster.ca", "SITES", ".login", "entry("):
+            assert bad not in a, f"fetch to a sign-in URL ({bad}): {a}"
+
+
+# Spec 0002 AC19/AC27 — renewal keeps no secrets: no new local/sync storage, only allowed session keys, no URL logged
+def test_renewal_keeps_no_secrets():
+    bg = ext("background.js")
+    bodies = [js_function(bg, n) for n in ("openRenewalTab", "rerun", "sync")] + _listeners(bg)
+    for b in bodies:
+        for m in re.finditer(r"console\.\w+\s*\(", b):
+            args = call_args(b, m.end() - 1)
+            assert not re.search(r"url", args, re.I), f"console call mentions a URL: {args}"
+    assert not re.search(r"storage\.(local|sync)\.set\s*\(", bg), "background.js writes browser.storage.local/sync"
+    sets = [call_args(bg, m.end() - 1) for m in re.finditer(r"storage\.session\.set\s*\(", bg)]
+    assert sets, "renewal state is never saved to browser.storage.session"
+    for a in sets:
+        keys = _object_keys(a)
+        assert keys is not None, f"storage.session.set argument is not an object literal; keys cannot be checked: {a}"
+        extra = [k for k in keys if k not in ("fallback", "skipped") and "crowdmark" not in k.lower()]
+        assert not extra, f"storage.session.set stores other keys {extra}: {a}"
 
 
 if __name__ == "__main__":
