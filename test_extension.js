@@ -483,6 +483,220 @@ test('0002 AC24 crowdmarkEntry: a Crowdmark-titled topic without type=lti is ski
   assert.equal(P.crowdmarkEntry([]), null);
 });
 
+// ---- Spec 0002 session renewal: renewal decisions (plan 0002 Step 3) --------------
+// Fakes stand in for the browser: open(source) -> {ok:true} | {tabId}, rerun(source) -> posted status,
+// notify(sources), entry(source) -> URL | null, now() -> Date. They record what renewal asked the browser to do.
+
+const at = (h, m) => new Date(2026, 9, 15, h, m);
+const tick = () => new Promise((r) => setImmediate(r));
+const newState = () => ({ fallback: {}, skipped: [], busy: false });
+
+function fakeBrowser({ now = at(12, 0), open = () => ({ ok: true }), rerun = () => 'ok', entry } = {}) {
+  const calls = { open: [], rerun: [], notify: [], log: [] };
+  const d = {
+    clock: now,
+    now: () => d.clock,
+    entry: entry || ((s) => `https://entry.example/${s}`),
+    open: async (s) => { calls.open.push(s); calls.log.push(`open ${s}`); const r = await open(s, d); calls.log.push(`done ${s}`); return r; },
+    rerun: async (s) => { calls.rerun.push(s); return rerun(s, d); },
+    notify: async (sources) => { calls.notify.push([...sources]); },
+  };
+  return { d, calls };
+}
+
+test('0002 AC2 one login-needed source: its renewal tab is opened once', async () => {
+  const { d, calls } = fakeBrowser();
+  await P.renewAll(['crowdmark'], newState(), d);
+  assert.deepEqual(calls.open, ['crowdmark']);
+});
+
+test('0002 AC3 renewal succeeds: that source alone is synced again; no notification', async () => {
+  const { d, calls } = fakeBrowser();
+  await P.renewAll(['crowdmark'], newState(), d);
+  assert.deepEqual(calls.rerun, ['crowdmark']);
+  assert.deepEqual(calls.notify, []);
+});
+
+test('0002 AC5 still login needed after the rerun: no second renewal tab in that sync', async () => {
+  const { d, calls } = fakeBrowser({ rerun: () => 'login needed' });
+  await P.renewAll(['crowdmark'], newState(), d);
+  assert.deepEqual(calls.open, ['crowdmark']);
+  assert.deepEqual(calls.rerun, ['crowdmark']);
+});
+
+test('0002 AC6 quiet window 23:00-06:00: no tab and no notification at 23:00, 02:00, 05:59; renewal at 22:59, 06:00', async () => {
+  for (const [h, m] of [[23, 0], [2, 0], [5, 59]]) {
+    const { d, calls } = fakeBrowser({ now: at(h, m) });
+    await P.renewAll(['avenue', 'childsmath'], newState(), d);
+    assert.deepEqual(calls.open, [], `opened at ${h}:${m}`);
+    assert.deepEqual(calls.notify, [], `notified at ${h}:${m}`);
+  }
+  for (const [h, m] of [[22, 59], [6, 0]]) {
+    const { d, calls } = fakeBrowser({ now: at(h, m) });
+    await P.renewAll(['avenue'], newState(), d);
+    assert.deepEqual(calls.open, ['avenue'], `not opened at ${h}:${m}`);
+  }
+});
+
+test('0002 AC6 quiet window is checked when each renewal would start, not once per sync', async () => {
+  // Avenue starts at 22:59; its renewal ends at 23:00, so childsmath would start inside the window.
+  const { d, calls } = fakeBrowser({ now: at(22, 59), open: (s, dd) => { dd.clock = at(23, 0); return { ok: true }; } });
+  await P.renewAll(['avenue', 'childsmath'], newState(), d);
+  assert.deepEqual(calls.open, ['avenue']);
+  assert.deepEqual(calls.notify, []);
+});
+
+test('0002 AC7 a source left during the quiet window is renewed by the first sync at 06:00', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ now: at(23, 30) });
+  await P.renewAll(['avenue'], state, d);
+  assert.deepEqual(calls.open, []);
+  d.clock = at(6, 0);
+  await P.renewAll(['avenue'], state, d);
+  assert.deepEqual(calls.open, ['avenue']);
+});
+
+test('0002 AC8 two sources renew one after another: the next tab opens only after the previous renewal ended', async () => {
+  const { d, calls } = fakeBrowser({ open: async () => { await tick(); return { ok: true }; } });
+  await P.renewAll(['avenue', 'childsmath'], newState(), d);
+  assert.deepEqual(calls.log, ['open avenue', 'done avenue', 'open childsmath', 'done childsmath']);
+});
+
+test('0002 AC26 fixed order avenue -> crowdmark -> childsmath whatever the input order', async () => {
+  const { d, calls } = fakeBrowser();
+  await P.renewAll(['childsmath', 'crowdmark', 'avenue'], newState(), d);
+  assert.deepEqual(calls.open, ['avenue', 'crowdmark', 'childsmath']);
+});
+
+test('0002 AC26 + AC11 Avenue goes to fallback: Crowdmark and childsmath get no tab', async () => {
+  const { d, calls } = fakeBrowser({ open: (s) => (s === 'avenue' ? { tabId: 3 } : { ok: true }) });
+  await P.renewAll(['childsmath', 'crowdmark', 'avenue'], newState(), d);
+  assert.deepEqual(calls.open, ['avenue']);
+});
+
+test('0002 AC26 Crowdmark with no known entry URL: no tab, straight to the notification', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ entry: (s) => (s === 'crowdmark' ? null : `https://entry.example/${s}`) });
+  await P.renewAll(['crowdmark'], state, d);
+  assert.deepEqual(calls.open, []);
+  assert.equal(calls.notify.length, 1);
+  assert.ok(calls.notify[0].includes('crowdmark'), `notify ${JSON.stringify(calls.notify)}`);
+  assert.ok(!('crowdmark' in state.fallback), 'crowdmark has a fallback tab entry without a tab');
+});
+
+test('0002 AC10 renewal times out: its tab is kept as the fallback tab and one notification names the source', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ open: () => ({ tabId: 7 }) });
+  await P.renewAll(['avenue'], state, d);
+  assert.equal(state.fallback.avenue, 7);
+  assert.deepEqual(calls.notify, [['avenue']]);
+  assert.deepEqual(calls.rerun, [], 'a fallback source is not re-synced before sign-in');
+});
+
+test('0002 AC11 first source falls back: others skipped, one notification names all three', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ open: () => ({ tabId: 7 }) });
+  await P.renewAll(['avenue', 'crowdmark', 'childsmath'], state, d);
+  assert.deepEqual(calls.open, ['avenue']);
+  assert.deepEqual(calls.notify, [['avenue', 'crowdmark', 'childsmath']]);
+  assert.deepEqual(state.fallback, { avenue: 7 });
+  assert.deepEqual([...state.skipped].sort(), ['childsmath', 'crowdmark']);
+});
+
+test('0002 AC11 + AC13 sign-in in the fallback tab: the source re-syncs, then skipped sources renew in order', async () => {
+  const state = newState();
+  let first = true;
+  const { d, calls } = fakeBrowser({ open: () => (first ? (first = false, { tabId: 7 }) : { ok: true }) });
+  await P.renewAll(['avenue', 'crowdmark', 'childsmath'], state, d);
+  calls.open.length = 0; calls.rerun.length = 0; calls.log.length = 0;
+  await P.fallbackSignedIn('avenue', state, d);
+  assert.equal(calls.rerun[0], 'avenue', `rerun ${calls.rerun}`);
+  assert.deepEqual(calls.open, ['crowdmark', 'childsmath']);
+  assert.deepEqual(calls.log, ['open crowdmark', 'done crowdmark', 'open childsmath', 'done childsmath']);
+  assert.ok(!('avenue' in state.fallback), 'avenue still has a fallback tab entry');
+  assert.deepEqual(state.skipped, []);
+});
+
+test('0002 AC11 fallback source re-syncs but is not ok: skipped sources are not retried', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ open: () => ({ tabId: 7 }) });
+  await P.renewAll(['avenue', 'crowdmark', 'childsmath'], state, d);
+  calls.open.length = 0;
+  d.rerun = async () => 'login needed';
+  await P.fallbackSignedIn('avenue', state, d);
+  assert.deepEqual(calls.open, []);
+});
+
+test('0002 AC14 open fallback tab is reused: a later sync opens no tab and shows no notification for it', async () => {
+  const state = newState();
+  state.fallback.avenue = 7;
+  const { d, calls } = fakeBrowser();
+  await P.renewAll(['avenue'], state, d);
+  assert.deepEqual(calls.open, []);
+  assert.deepEqual(calls.notify, []);
+  assert.equal(state.fallback.avenue, 7);
+});
+
+test('0002 AC14 an older fallback tab for one source does not block renewal of another source', async () => {
+  const state = newState();
+  state.fallback.avenue = 7;
+  const { d, calls } = fakeBrowser();
+  await P.renewAll(['avenue', 'childsmath'], state, d);
+  assert.deepEqual(calls.open, ['childsmath']);
+});
+
+test('0002 AC15 fallback tab closed without sign-in: the next sync tries renewal again', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ open: () => ({ tabId: 7 }) });
+  await P.renewAll(['avenue'], state, d);
+  delete state.fallback.avenue; // what tabs.onRemoved will do
+  await P.renewAll(['avenue'], state, d);
+  assert.deepEqual(calls.open, ['avenue', 'avenue']);
+});
+
+test('0002 overlap guard: an alarm sync and a click sync at once open one tab per source', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ open: async () => { await tick(); return { ok: true }; } });
+  await Promise.all([P.renewAll(['avenue'], state, d), P.renewAll(['avenue'], state, d)]);
+  assert.deepEqual(calls.open, ['avenue']);
+  await P.renewAll(['avenue'], state, d);
+  assert.deepEqual(calls.open, ['avenue', 'avenue'], 'guard stuck after the first run finished');
+});
+
+test('0002 session default: Crowdmark with no known entry URL is notified but is not a fallback; later sources still renew', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ entry: (s) => (s === 'crowdmark' ? null : `https://entry.example/${s}`) });
+  await P.renewAll(['childsmath', 'crowdmark'], state, d);
+  assert.deepEqual(calls.open, ['childsmath']);
+  assert.deepEqual(calls.notify, [['crowdmark']]);
+  assert.deepEqual(state.skipped, []);
+});
+
+test('0002 session default: sign-in seen but re-sync not ok keeps the fallback tab tracked and retries nothing', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ open: () => ({ tabId: 7 }) });
+  await P.renewAll(['avenue', 'crowdmark', 'childsmath'], state, d);
+  calls.open.length = 0;
+  d.rerun = async () => 'login needed';
+  await P.fallbackSignedIn('avenue', state, d);
+  assert.deepEqual(calls.open, []);
+  assert.deepEqual(state.fallback, { avenue: 7 });
+  assert.deepEqual(state.skipped, ['crowdmark', 'childsmath']);
+});
+
+test('0002 AC9 one source needs sign-in: the other two are posted ok with their items before syncAll resolves', async () => {
+  const got = await runSync({
+    avenue: async () => ({ items: [{ source_id: 'dropbox:1', title: 'A1' }], categoryMarks: [] }),
+    crowdmark: async () => { throw new P.LoginNeeded('crowdmark'); },
+    childsmath: async () => ({ items: [{ source_id: 'c1', title: 'Assignment #1' }] }),
+  });
+  assert.equal(got.crowdmark.status, 'login needed');
+  assert.equal(got.avenue.status, 'ok');
+  assert.deepEqual(got.avenue.items, [{ source_id: 'dropbox:1', title: 'A1' }]);
+  assert.equal(got.childsmath.status, 'ok');
+  assert.deepEqual(got.childsmath.items, [{ source_id: 'c1', title: 'Assignment #1' }]);
+});
+
 // ---------------------------------------------------------------------------------
 
 (async () => {

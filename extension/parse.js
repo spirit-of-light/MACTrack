@@ -252,7 +252,44 @@ function crowdmarkEntry(topics) {
   return t ? SITES.avenue.origin + t.Url : null;
 }
 
+const RENEW_ORDER = ['avenue', 'crowdmark', 'childsmath']; // AC26: Crowdmark signs in through Avenue
+
+// Plan 0002 Step 3: renew login-needed sources one at a time in background tabs.
+// d = { now() -> Date, entry(source) -> URL | null, open(source) -> {ok:true} | {tabId},
+//       rerun(source) -> posted status, notify(sources) }; state = { fallback: {source: tabId}, skipped, busy }.
+async function renewAll(sources, state, d) {
+  if (state.busy) return; // an alarm sync and a click sync never open two tabs for one source
+  state.busy = true;
+  const affected = [];
+  const skipped = [];
+  let fellBack = false;
+  try {
+    for (const source of RENEW_ORDER.filter((s) => sources.includes(s))) {
+      if (source in state.fallback) continue; // AC14: its fallback tab is still open
+      if (quietHour(d.now())) continue; // AC6: checked when this renewal would start
+      if (fellBack) { skipped.push(source); affected.push(source); continue; } // AC11
+      if (!d.entry(source)) { affected.push(source); continue; } // Crowdmark not yet discovered: not an IdP failure
+      const r = await d.open(source);
+      if (r && r.ok) await d.rerun(source); // AC3; a rerun never renews again (AC5)
+      else { state.fallback[source] = r.tabId; affected.push(source); fellBack = true; } // AC10
+    }
+    state.skipped = skipped;
+    if (affected.length) await d.notify(affected);
+  } finally {
+    state.busy = false;
+  }
+}
+
+// AC13/AC11: the student signed in through a fallback tab. Not ok yet: keep tracking that tab, retry nothing.
+async function fallbackSignedIn(source, state, d) {
+  if ((await d.rerun(source)) !== 'ok') return;
+  delete state.fallback[source];
+  const skipped = state.skipped;
+  state.skipped = [];
+  await renewAll(skipped, state, d);
+}
+
 if (typeof module !== 'undefined') {
   module.exports = { dueDate, childsmathLabel, childsmathItems, termStart, parseMarks, applyMarks, ssCategories, ssCode, toolLaunchPath,
-    avenueItems, crowdmarkItems, syncAll, LoginNeeded, SITES, loggedInUrl, quietHour, crowdmarkEntry };
+    avenueItems, crowdmarkItems, syncAll, LoginNeeded, SITES, loggedInUrl, quietHour, crowdmarkEntry, renewAll, fallbackSignedIn };
 }
