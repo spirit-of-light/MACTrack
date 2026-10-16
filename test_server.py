@@ -1567,6 +1567,36 @@ def test_fallback_tab_closed():
     assert re.search(r"renew", body, re.I), "a closed renewal tab does not end its renewal"
 
 
+# ---- Spec 0002 Step 6: index.html sign-in link (static; the click is checked manually) ----
+
+def _site_login(source):
+    m = re.search(rf"\b{source}\s*:\s*\{{[^}}]*?\blogin\s*:\s*'([^']+)'", ext("parse.js"))
+    assert m, f"no SITES.{source}.login in parse.js"
+    return m.group(1)
+
+
+# Spec 0002 AC16 — the `login needed` banner links to the source's login entry URL (Crowdmark -> Avenue's)
+def test_index_login_links():
+    html = (ROOT / "index.html").read_text()
+    urls = {s: _site_login(s) for s in ("avenue", "childsmath")}
+    for url in urls.values():
+        assert url in html, f"{url} not in index.html"
+    m = re.search(r"const\s+LOGIN\s*=\s*\{([^}]*)\}", html)
+    assert m, "no LOGIN map in index.html"
+    vals = dict(re.findall(r"\b(avenue|crowdmark|childsmath)\s*:\s*([^,\n}]+)", m.group(1)))
+    assert set(vals) == {"avenue", "crowdmark", "childsmath"}, f"LOGIN keys: {sorted(vals)}"
+    lit = lambda v: v.strip().strip("'\"`")
+    assert lit(vals["avenue"]) == urls["avenue"], f"LOGIN.avenue {vals['avenue']}"
+    assert lit(vals["childsmath"]) == urls["childsmath"], f"LOGIN.childsmath {vals['childsmath']}"
+    assert vals["crowdmark"].strip() == vals["avenue"].strip() or lit(vals["crowdmark"]) == urls["avenue"], \
+        f"LOGIN.crowdmark is not Avenue's entry URL: {vals['crowdmark']}"
+    near = [html[max(0, i.start() - 600):i.start() + 600] for i in re.finditer(r"login needed", html)]
+    link = r"(?:\$\(\s*['\"]a['\"]|createElement\(\s*['\"]a['\"])[^;]*?href\s*[:=]\s*LOGIN\[|\.href\s*=\s*LOGIN\["
+    assert any(re.search(link, w, re.S) for w in near), "the login-needed banner builds no <a> with href from LOGIN"
+    assert any(re.search(r"noopener", w) for w in near), "sign-in link opened without rel=noopener"
+    assert "innerHTML" not in html, "index.html uses innerHTML"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:

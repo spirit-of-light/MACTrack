@@ -33,6 +33,12 @@
 <main id="list"></main>
 <script>
 'use strict';
+// Spec 0002 AC16: copy of extension/parse.js SITES[*].login; Crowdmark signs in through Avenue (session default).
+const LOGIN = {
+  avenue: 'https://avenue.mcmaster.ca/login.php?target=%2Fd2l%2Fhome',
+  crowdmark: 'https://avenue.mcmaster.ca/login.php?target=%2Fd2l%2Fhome',
+  childsmath: 'https://login.microsoftonline.com/44376307-b429-42ad-8c25-28cd496f4772/oauth2/v2.0/authorize?client_id=9132e1a8-fef6-4c34-bddb-de7608a2381a&response_type=code&response_mode=query&scope=https%3A%2F%2Fgraph.microsoft.com%2FUser.Read',
+};
 const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'practice', 'other'];
 const $ = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 const days = () => Number(localStorage.getItem('upcomingDays')) || 7; // AC41/AC42/AC51: browser only
@@ -99,9 +105,10 @@ function render() {
   // AC30: one banner per source that needs attention; the other sources still render below.
   document.getElementById('banners').replaceChildren(...Object.entries(status)
     .filter(([, s]) => s.status !== 'ok')
-    .map(([src, s]) => $('div', { className: 'banner',
-      textContent: s.status === 'login needed' ? `${src}: login needed — sign in, then sync again`
-        : `${src}: ${s.status}${s.error ? ` — ${s.error}` : ''}` })));
+    .map(([src, s]) => (s.status === 'login needed'
+      ? $('div', { className: 'banner' }, `${src}: login needed — `,
+        $('a', { href: LOGIN[src], target: '_blank', rel: 'noopener', textContent: 'sign in' }), ', then sync again')
+      : $('div', { className: 'banner', textContent: `${src}: ${s.status}${s.error ? ` — ${s.error}` : ''}` }))));
   document.getElementById('sources').textContent = Object.entries(status)
     .map(([src, s]) => `${src}: ${s.status}, synced ${new Date(s.synced_at).toLocaleString()}`).join(' · ');
 
