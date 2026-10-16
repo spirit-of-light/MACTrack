@@ -402,6 +402,87 @@ test('Bug 7 Text gradebook items are not items; they come back as courseInfo [{n
   assert.deepEqual(r.categoryMarks, []);
 });
 
+// ---- Spec 0002 session renewal: pure helpers (plan 0002 Step 2) -------------------
+
+const AVENUE_ENTRY = 'https://avenue.mcmaster.ca/login.php?target=%2Fd2l%2Fhome';
+const CHILDSMATH_ENTRY = 'https://login.microsoftonline.com/44376307-b429-42ad-8c25-28cd496f4772/oauth2/v2.0/authorize?client_id=9132e1a8-fef6-4c34-bddb-de7608a2381a&response_type=code&response_mode=query&scope=https%3A%2F%2Fgraph.microsoft.com%2FUser.Read';
+const LOGGED_IN = {
+  avenue: 'https://avenue.cllmcmaster.ca/d2l/home',
+  crowdmark: 'https://app.crowdmark.com/student/courses',
+  childsmath: 'https://www.childsmath.ca/childsa/forms/main_intro.php',
+};
+const IDP_URLS = [
+  CHILDSMATH_ENTRY,
+  'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=x',
+  'https://cap.mcmaster.ca/mcauth/login.jsp?app_id=1492',
+];
+const CM_LTI = '/d2l/common/dialogs/quickLink/quickLink.d2l?ou=787224&type=lti&rcode=Mac-4028664&srcou=787224';
+
+test('0002 AC22 + AC23 + AC25 SITES: login entry URLs per source; Crowdmark has none', () => {
+  assert.ok(P.SITES, 'P.SITES is not exported');
+  assert.equal(P.SITES.avenue.login, AVENUE_ENTRY);
+  assert.equal(P.SITES.childsmath.login, CHILDSMATH_ENTRY);
+  assert.ok(P.SITES.crowdmark, 'P.SITES.crowdmark missing');
+  assert.ok(!P.SITES.crowdmark.login, `crowdmark has a static login: ${P.SITES.crowdmark.login}`);
+});
+
+test('0002 AC21 + AC22 loggedInUrl avenue: /d2l/ on cllmcmaster is in; /d2l/login and avenue.mcmaster.ca are not', () => {
+  assert.equal(P.loggedInUrl('avenue', 'https://avenue.cllmcmaster.ca/d2l/home'), true);
+  assert.equal(P.loggedInUrl('avenue', 'https://avenue.cllmcmaster.ca/d2l/login?sessionExpired=0&target=%2fd2l%2fhome'), false);
+  assert.equal(P.loggedInUrl('avenue', AVENUE_ENTRY), false);
+  assert.equal(P.loggedInUrl('avenue', 'https://avenue.mcmaster.ca/d2l/home'), false);
+});
+
+test('0002 AC21 + AC25 loggedInUrl crowdmark: /student/ on app.crowdmark.com is in; root is not', () => {
+  assert.equal(P.loggedInUrl('crowdmark', 'https://app.crowdmark.com/student/courses'), true);
+  assert.equal(P.loggedInUrl('crowdmark', 'https://app.crowdmark.com/'), false);
+  assert.equal(P.loggedInUrl('crowdmark', 'https://avenue.cllmcmaster.ca' + CM_LTI), false);
+});
+
+test('0002 AC21 + AC23 loggedInUrl childsmath: exactly main_intro.php is in; other childsmath pages are not', () => {
+  assert.equal(P.loggedInUrl('childsmath', 'https://www.childsmath.ca/childsa/forms/main_intro.php'), true);
+  assert.equal(P.loggedInUrl('childsmath', 'https://www.childsmath.ca/childsa/forms/1bStuff/student_admin.php'), false);
+});
+
+test('0002 AC21 + AC3 loggedInUrl: IdP pages and other sources\' logged-in URLs are never logged in', () => {
+  for (const source of Object.keys(LOGGED_IN)) {
+    for (const url of IDP_URLS) assert.equal(P.loggedInUrl(source, url), false, `${source} ${url}`);
+    for (const [other, url] of Object.entries(LOGGED_IN)) {
+      if (other !== source) assert.equal(P.loggedInUrl(source, url), false, `${source} accepted ${other} ${url}`);
+    }
+  }
+});
+
+test('0002 AC21 + AC6 quietHour: 23:00 inclusive to 06:00 exclusive, local time', () => {
+  const at = (h, m) => P.quietHour(new Date(2026, 9, 15, h, m));
+  assert.equal(at(22, 59), false, '22:59');
+  assert.equal(at(23, 0), true, '23:00');
+  assert.equal(at(2, 0), true, '02:00');
+  assert.equal(at(5, 59), true, '05:59');
+  assert.equal(at(6, 0), false, '06:00');
+  assert.equal(at(12, 0), false, '12:00');
+});
+
+test('0002 AC21 + AC24 crowdmarkEntry: first Crowdmark-titled lti topic, prefixed with the Avenue origin', () => {
+  const topics = [
+    { Title: 'Course Outline', Url: '/x' },
+    { Title: 'Crowdmark', TypeIdentifier: 'Link', Url: CM_LTI },
+  ];
+  assert.equal(P.crowdmarkEntry(topics), 'https://avenue.cllmcmaster.ca' + CM_LTI);
+  assert.equal(P.crowdmarkEntry([{ Title: 'crowdmark assignments', Url: CM_LTI }, { Title: 'Crowdmark', Url: CM_LTI + '&second=1' }]),
+    'https://avenue.cllmcmaster.ca' + CM_LTI, 'title match is case-insensitive and the first hit wins');
+});
+
+test('0002 AC24 crowdmarkEntry: a Crowdmark-titled topic without type=lti is skipped; no match gives null', () => {
+  assert.equal(P.crowdmarkEntry([{ Title: 'Crowdmark', Url: '/content/crowdmark-instructions.html' }]), null);
+  assert.equal(P.crowdmarkEntry([
+    { Title: 'Crowdmark', Url: '/content/crowdmark-instructions.html' },
+    { Title: 'Crowdmark', Url: CM_LTI },
+  ]), 'https://avenue.cllmcmaster.ca' + CM_LTI);
+  assert.equal(P.crowdmarkEntry([{ Title: 'Course Outline', Url: '/x' }, { Title: 'Lab', Url: '/l?type=lti' }]), null);
+  assert.equal(P.crowdmarkEntry([]), null);
+});
+
 // ---------------------------------------------------------------------------------
 
 (async () => {

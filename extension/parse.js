@@ -220,7 +220,39 @@ async function syncAll(fetchers, post) {
   }));
 }
 
+// Spec 0002 AC22/AC23/AC25: renewal entry URL per source and its "logged in" tab-URL test.
+// Crowdmark has no static entry: it is discovered from an Avenue TOC topic (crowdmarkEntry, AC24).
+const SITES = {
+  avenue: {
+    login: 'https://avenue.mcmaster.ca/login.php?target=%2Fd2l%2Fhome',
+    origin: 'https://avenue.cllmcmaster.ca',
+    in: (path) => path.startsWith('/d2l/') && !path.startsWith('/d2l/login'),
+  },
+  crowdmark: { login: null, origin: 'https://app.crowdmark.com', in: (path) => path.startsWith('/student/') },
+  childsmath: {
+    login: 'https://login.microsoftonline.com/44376307-b429-42ad-8c25-28cd496f4772/oauth2/v2.0/authorize?client_id=9132e1a8-fef6-4c34-bddb-de7608a2381a&response_type=code&response_mode=query&scope=https%3A%2F%2Fgraph.microsoft.com%2FUser.Read',
+    origin: 'https://www.childsmath.ca',
+    in: (path) => path === '/childsa/forms/main_intro.php',
+  },
+};
+
+function loggedInUrl(source, url) {
+  const site = SITES[source];
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  return Boolean(site) && u.origin === site.origin && site.in(u.pathname);
+}
+
+// AC6: quiet window is local 23:00 inclusive to 06:00 exclusive.
+const quietHour = (date) => date.getHours() >= 23 || date.getHours() < 6;
+
+// AC24: first topic titled like Crowdmark whose Url is an LTI launch, as an absolute Avenue URL.
+function crowdmarkEntry(topics) {
+  const t = (topics || []).find((x) => /crowdmark/i.test(x.Title || '') && /type=lti/.test(x.Url || ''));
+  return t ? SITES.avenue.origin + t.Url : null;
+}
+
 if (typeof module !== 'undefined') {
   module.exports = { dueDate, childsmathLabel, childsmathItems, termStart, parseMarks, applyMarks, ssCategories, ssCode, toolLaunchPath,
-    avenueItems, crowdmarkItems, syncAll, LoginNeeded };
+    avenueItems, crowdmarkItems, syncAll, LoginNeeded, SITES, loggedInUrl, quietHour, crowdmarkEntry };
 }
