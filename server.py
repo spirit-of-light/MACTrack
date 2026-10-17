@@ -8,6 +8,8 @@ import re
 import secrets
 import socketserver
 import sqlite3
+import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +21,9 @@ HERE = Path(__file__).resolve().parent
 ADDR = ("127.0.0.1", 8000)
 MAX_BODY = 20 * 1024 * 1024  # outline PDFs are the largest bodies
 MAX_PDF_PAGES = 50  # course outlines are a few pages; bounds pypdf work on untrusted bytes
+MAX_DOCX_XML = 10 * 1024 * 1024  # uncompressed word/document.xml cap: bounds zip-bomb work on untrusted bytes
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items(
@@ -352,6 +357,41 @@ def pdf_text(data):
         raise ValueError(f"unreadable PDF ({type(e).__name__})") from None
 
 
+def docx_text(data):
+    """Text of an outline .docx (stdlib): one line per paragraph, one tab-joined line per table row.
+    ElementTree resolves no external entities. Raises ValueError for anything unreadable."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            info = z.getinfo("word/document.xml")
+            if info.file_size > MAX_DOCX_XML:
+                raise ValueError("word/document.xml too large")
+            with z.open(info) as f:
+                xml = f.read(MAX_DOCX_XML + 1)  # the declared size can lie; never read past the cap
+        if len(xml) > MAX_DOCX_XML:
+            raise ValueError("word/document.xml too large")
+        root = ET.fromstring(xml)
+    except Exception as e:  # zipfile/ET raise many types on malformed input; never logs content
+        raise ValueError(f"unreadable DOCX ({type(e).__name__})") from None
+
+    def para(p):
+        return "".join(n.text or "" if n.tag == W + "t" else "\t" for n in p.iter() if n.tag in (W + "t", W + "tab"))
+
+    lines = []
+
+    def walk(el):
+        for child in el:
+            if child.tag == W + "tr":
+                lines.append("\t".join(" ".join(para(p) for p in tc.iter(W + "p")).strip()
+                                        for tc in child.iter(W + "tc")))
+            elif child.tag == W + "p":
+                lines.append(para(child))
+            else:
+                walk(child)
+
+    walk(root)
+    return "\n".join(lines)
+
+
 def update_weights(c, code, change):
     """Read-modify-write one course's weights JSON inside the caller's transaction."""
     row = c.execute("SELECT weights FROM courses WHERE code = ?", (code,)).fetchone()
@@ -522,11 +562,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         ctype = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
         try:
-            if url.path == "/api/outline" and ctype == "application/pdf":
+            if url.path == "/api/outline" and ctype in ("application/pdf", DOCX):
                 course = parse_qs(url.query).get("course", [""])[0]
-                cats = outline_categories(pdf_text(data))
+                kind = "PDF" if ctype == "application/pdf" else "DOCX"
+                cats = outline_categories(pdf_text(data) if kind == "PDF" else docx_text(data))
                 if not cats:
-                    raise ValueError("no `<Name> ... NN%` lines found in the PDF")
+                    raise ValueError(f"no `<Name> ... NN%` lines found in the {kind}")
                 store_outline(self.server.db, course, cats)
             else:
                 body = json.loads(data)

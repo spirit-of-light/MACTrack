@@ -3,6 +3,7 @@
 Plain `assert` functions named test_*; the runner below calls each one,
 prints `FAIL <name>: <exception>` per failure and exits 1 if any fail.
 """
+import io
 import json
 import re
 from datetime import datetime
@@ -715,7 +716,7 @@ def post_outline(s, course, body, ctype, token=True):
     headers = {"Content-Type": ctype}
     if token:
         headers["X-Token"] = s.token
-    path = "/api/outline" + ("?course=" + urllib.parse.quote(course) if ctype == "application/pdf" else "")
+    path = "/api/outline" + ("?course=" + urllib.parse.quote(course) if ctype != "application/json" else "")
     data = body if isinstance(body, bytes) else json.dumps({"course": course, "categories": body}).encode()
     return status_of("POST", s.url + path, headers, data)
 
@@ -801,6 +802,71 @@ def test_outline_bad_pdf():
         assert code == 400, f"bad PDF -> {code}"
         assert db_dump(s) == before, "DB changed on a bad PDF"
 
+
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def tiny_docx(document_xml=None):
+    """Minimal .docx: a weight paragraph and a two-row weight table (cells `Name` | `NN%`)."""
+    import zipfile
+
+    def p(text):
+        return f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"
+
+    def row(*cells):
+        return "<w:tr>" + "".join(f"<w:tc>{p(c)}</w:tc>" for c in cells) + "</w:tr>"
+
+    if document_xml is None:
+        document_xml = (f'<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="{W}"><w:body>'
+                        + p("Course Outline") + p("Assignments ...... 20%")
+                        + "<w:tbl>" + row("Midterm Test", "30%") + row("Final Exam", "50%") + "</w:tbl>"
+                        + "</w:body></w:document>")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml",
+                   '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                   '<Default Extension="xml" ContentType="application/xml"/></Types>')
+        z.writestr("word/document.xml", document_xml)
+    return buf.getvalue()
+
+
+# AC14/AC15 (DOCX, live bug COMPSCI 1MD3) — a .docx outline's paragraphs and table rows give weights (stdlib only)
+def test_outline_docx():
+    with InProcess() as s:
+        post_outline_ok(s, "COMPSCI 1MD3", tiny_docx(), DOCX)
+        w = course_weights(s, "COMPSCI 1MD3")
+        assert w["schemes"] == [{"Assignments": 20, "Midterm Test": 30, "Final Exam": 50}], w
+
+
+# DOCX guard — garbage, a zip without word/document.xml, or an oversized document.xml is a 400 that stores nothing
+def test_outline_bad_docx():
+    import zipfile
+
+    with InProcess() as s:
+        post_outline_ok(s, "COMPSCI 1MD3", cats(("Assignments", "100%")))  # control: route exists
+        before = db_dump(s)
+        assert post_outline(s, "COMPSCI 1MD3", b"PK\x03\x04 not really a docx", DOCX) == 400, "garbage DOCX accepted"
+        empty = io.BytesIO()
+        with zipfile.ZipFile(empty, "w") as z:
+            z.writestr("[Content_Types].xml", "<Types/>")
+        assert post_outline(s, "COMPSCI 1MD3", empty.getvalue(), DOCX) == 400, "DOCX without word/document.xml accepted"
+        big = (f'<w:document xmlns:w="{W}"><w:body><w:p><w:r><w:t>Final Exam 50%</w:t></w:r></w:p>'
+               + " " * (11 * 1024 * 1024) + "</w:body></w:document>")
+        data = tiny_docx(big)
+        assert len(data) < 1024 * 1024, "fixture should be small on the wire"
+        assert post_outline(s, "COMPSCI 1MD3", data, DOCX) == 400, "oversized word/document.xml accepted"
+        no_weights = tiny_docx(f'<w:document xmlns:w="{W}"><w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body></w:document>')
+        assert post_outline(s, "COMPSCI 1MD3", no_weights, DOCX) == 400, "DOCX with no weight lines accepted"
+        assert db_dump(s) == before, "DB changed on a bad DOCX"
+
+
+# DOCX (extension side) — a File topic's outline is sent as PDF or DOCX by its type; anything else is skipped
+def test_outline_file_types():
+    body = js_function(ext("background.js"), "outline")
+    assert DOCX in body, "outline() never sends the DOCX content type"
+    assert "application/pdf" in body, "outline() no longer sends PDFs"
+    assert "outline is not a PDF or DOCX" in body, "an unknown outline file type is not skipped with a warning"
 
 # Plan Step 5 (Ambiguity 5) — the outline route needs X-Token
 def test_outline_needs_token():

@@ -113,8 +113,14 @@ async function outline(tocTopics, code) {
   const topic = tocTopics.find((t) => /outline|syllabus/i.test(t.Title || ''));
   if (!topic || !topic.Url) return;
   if (topic.TypeIdentifier === 'File') {
-    const bytes = await (await get(new URL(topic.Url, AVENUE).href)).arrayBuffer();
-    await post(`/api/outline?course=${encodeURIComponent(code)}`, bytes, 'application/pdf');
+    const r = await get(new URL(topic.Url, AVENUE).href);
+    // By the file's extension, else the response type: PDF or DOCX (COMPSCI 1MD3); anything else is skipped.
+    const ext = /\.(pdf|docx)(?:$|[?#])/i.exec(topic.Url);
+    const sent = (ext ? ext[1] : (r.headers.get('Content-Type') || '')).toLowerCase();
+    const ctype = /pdf/.test(sent) ? 'application/pdf'
+      : /docx|wordprocessingml/.test(sent) ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : null;
+    if (!ctype) return console.warn(`MacTracker: outline is not a PDF or DOCX for ${code}, skipped`);
+    await post(`/api/outline?course=${encodeURIComponent(code)}`, await r.arrayBuffer(), ctype);
   } else if (/type=lti/i.test(topic.Url)) {
     await post('/api/outline', { course: code, categories: await syllabusCategories(topic.Url) });
   }
