@@ -1597,6 +1597,20 @@ def test_index_login_links():
     assert "innerHTML" not in html, "index.html uses innerHTML"
 
 
+# Live 0.1.3 bug — a renewal/fallback tab counts as signed in only once its logged-in page has finished loading
+def test_renewal_waits_for_load():
+    bg = ext("background.js")
+    body = _listener(bg, "tabs.onUpdated")
+    complete = re.search(r"status\s*[!=]==?\s*['\"]complete['\"]", body)
+    assert complete, "tabs.onUpdated does not wait for status 'complete'"
+    for call in ("endRenewal(", "fallbackSignedIn("):
+        i = body.find(call)
+        assert i > complete.start(), f"{call} reachable before the status 'complete' check"
+    assert not re.search(r"\bloggedInUrl\s*\([^)]*change\w*\.url", body), \
+        "loggedInUrl checks the changed URL, not the loaded tab's URL"
+    assert re.search(r"\bloggedInUrl\s*\([^)]*\btab\.url", body), "loggedInUrl does not check tab.url"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:

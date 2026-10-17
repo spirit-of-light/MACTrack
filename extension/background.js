@@ -264,14 +264,16 @@ const RENEW = {
   }),
 };
 
-browser.tabs.onUpdated.addListener(async (tabId, change) => {
-  if (!change.url) return;
+// A tab counts as signed in only once its logged-in page finished loading: closing it mid-load
+// (Crowdmark) leaves the session unset.
+browser.tabs.onUpdated.addListener(async (tabId, change, tab) => {
+  if (change.status !== 'complete' || !tab.url) return;
   const w = watching[tabId];
-  if (w && loggedInUrl(w.source, change.url)) return endRenewal(tabId, { ok: true });
+  if (w && loggedInUrl(w.source, tab.url)) return endRenewal(tabId, { ok: true });
   // AC13/AC29: the student signed in through a fallback tab; the tab stays open, they are using it.
   await renewalReady;
   const source = fallbackSource(tabId);
-  if (!source || signingIn.has(source) || !loggedInUrl(source, change.url)) return;
+  if (!source || signingIn.has(source) || !loggedInUrl(source, tab.url)) return;
   signingIn.add(source);
   try {
     await fallbackSignedIn(source, renewal, RENEW);
