@@ -168,6 +168,7 @@ async function childsmath() {
     try {
       const base = `${CHILDSMATH}/childsa/forms/${area}`;
       const admin = textLines(await (await get(`${base}/student_admin.php`)).text());
+      if (childsmathLoggedOut(admin)) throw new LoginNeeded(`${base}/student_admin.php`);
       const label = childsmathLabel(admin); // AC86
       if (!label) throw new Error('no course label with a term on student_admin.php');
       const marks = parseMarks(textLines(await (await get(`${base}/marks.php`)).text()));

@@ -366,6 +366,25 @@ test('Bug 2 two childsmath areas with the same titles give distinct source_ids',
   assert.equal(new Set(ids).size, 4, `source_ids collide: ${ids}`);
 });
 
+// Live 0.1.2 bug: an expired childsmath session serves its login page (HTTP 200) for student_admin.php.
+const CM_LOGIN_PAGE = ['Childsmath', 'Welcome to the McMaster Mathematics online system', 'MacID login',
+  'Please sign in with your MacID to continue.'];
+const CM_ADMIN_PAGE = ['Student Admin Page', 'smithj', 'Log Out', 'Your Courses:', 'Math 1B03 F26',
+  'Assignment #1', '(Due date: 11:59pm on Tuesday September 22)', '0/8'];
+
+test('Bug childsmath login page served as 200 is recognised as logged out', () => {
+  assert.equal(P.childsmathLoggedOut(CM_LOGIN_PAGE), true);
+  assert.equal(P.childsmathLoggedOut([' MacID Login ']), true, 'whitespace and case');
+});
+
+test('Bug childsmath admin page, even without a course label, is not logged out', () => {
+  assert.equal(P.childsmathLoggedOut(CM_ADMIN_PAGE), false);
+  assert.equal(P.childsmathLoggedOut(['Student Admin Page', 'smithj', 'Log Out', 'Your Courses:']), false);
+  // An admin page that happens to mention MacID is still the admin page.
+  assert.equal(P.childsmathLoggedOut(['Student Admin Page', 'Log Out', 'Your MacID: smithj']), false);
+  assert.equal(P.childsmathLoggedOut([]), false, 'an empty page is not evidence of a login page');
+});
+
 test('Bug 3 any Avenue item with a mark is done (gradebook 1/1 and 0/5)', () => {
   const r = P.avenueItems({
     grades: [{ Id: 601, Name: 'Lab 1: Excel Exercises', MaxPoints: 1, GradeType: 'Numeric' },

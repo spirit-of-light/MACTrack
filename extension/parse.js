@@ -37,6 +37,15 @@ function childsmathLabel(lines) {
   return label;
 }
 
+// AC21: an expired session serves childsmath's login page (HTTP 200) in place of student_admin.php.
+// Login page = a MacID / sign-in prompt and none of the admin page markers.
+// ponytail: text heuristic from the live 0.1.2 report; tighten with a captured login page if it misfires.
+function childsmathLoggedOut(lines) {
+  const text = lines.map((l) => l.trim()).join('\n');
+  if (/student admin page|log ?out|your courses:/i.test(text)) return false;
+  return /\bmacid\b|sign ?in|log ?in/i.test(text);
+}
+
 function childsmathItems(lines, courseLabel = childsmathLabel(lines)) {
   const blocks = [];
   for (const line of lines.map((l) => l.trim())) {
@@ -293,6 +302,6 @@ async function fallbackSignedIn(source, state, d) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { dueDate, childsmathLabel, childsmathItems, termStart, parseMarks, applyMarks, ssCategories, ssCode, toolLaunchPath,
+  module.exports = { dueDate, childsmathLabel, childsmathLoggedOut, childsmathItems, termStart, parseMarks, applyMarks, ssCategories, ssCode, toolLaunchPath,
     avenueItems, crowdmarkItems, syncAll, LoginNeeded, SITES, loggedInUrl, quietHour, crowdmarkEntry, renewAll, fallbackSignedIn };
 }
