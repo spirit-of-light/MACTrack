@@ -130,6 +130,22 @@ test('AC55 ssCategories: % rows become {name, weights:[raw strings]}; other rows
   ]);
 });
 
+test('Live bug ssCategories: only percent-token cells are weights; a sentence mentioning % is dropped', () => {
+  const rows = [
+    ['Prelab Quizzes', 'Each prelab quiz is graded within the Stemble platform and worth 1.5 % of your final grade.'],
+    ['Labs', '1.5 %', 'see notes'],
+    ['Bonus', '0-5%**'],
+    ['Final Exam', '40-55%**', '45%'],
+    ['Assignments', '10%'],
+  ];
+  assert.deepEqual(P.ssCategories(rows), [
+    { name: 'Labs', weights: ['1.5 %'] },
+    { name: 'Bonus', weights: ['0-5%**'] },
+    { name: 'Final Exam', weights: ['40-55%**', '45%'] },
+    { name: 'Assignments', weights: ['10%'] },
+  ]);
+});
+
 test('AC54 ssCode: doc code from the sso-redirect URL, "/doc/" stripped', () => {
   const base = 'https://mcmaster.simplesyllabusca.com/en-US/sso-redirect?doc_url=';
   assert.equal(P.ssCode(base + '/doc/abc123XYZ'), 'abc123XYZ');
@@ -267,6 +283,25 @@ test('AC24 Crowdmark: title from exam-master, due, done = submitted-at, mark/out
   assert.ok(t['Assignment 4'].mark == null, 'mark without marks-sent-at');
   assert.ok(!t['Assignment 5'].done && t['Assignment 5'].mark == null);
   assert.equal(new Set(list.map((i) => i.source_id)).size, 3, 'source_id not unique');
+});
+
+test('Live bug Crowdmark sends totals as strings: mark/out_of become numbers; blank or junk become null', () => {
+  const cm = (total, points) => P.crowdmarkItems(
+    { data: [{ id: 'a1', attributes: { 'marks-sent-at': '2026-10-12T15:00:00Z' }, relationships: { 'exam-master': { data: { id: 'em1' } } } }],
+      included: [{ id: 'em1', attributes: { title: 'A1', 'total-points': points } }] },
+    { a1: { data: { attributes: { 'total-after-penalty': total } } } })[0];
+  assert.deepEqual([cm('19.5', '24').mark, cm('19.5', '24').out_of], [19.5, 24]);
+  assert.deepEqual([cm('', 'abc').mark, cm('', 'abc').out_of], [null, null]);
+  assert.deepEqual([cm(null, undefined).mark, cm(null, undefined).out_of], [null, null], 'missing is not 0');
+});
+
+test('Live bug rejectReason: the server error page gives its explanation, without tags or URLs', () => {
+  const page = '<!DOCTYPE HTML>\n<html lang="en">\n<head><title>Error response</title></head>\n<body>\n'
+    + '<h1>Error response</h1>\n<p>Error code: 400</p>\n<p>Message: Bad Request.</p>\n'
+    + '<p>Error code explanation: 400 - wrong type for mark, out_of.</p>\n</body>\n</html>\n';
+  assert.equal(P.rejectReason(page), 'wrong type for mark, out_of');
+  assert.equal(P.rejectReason('bad item at https://app.crowdmark.com/x?y=1'), 'bad item at [url]');
+  assert.ok(P.rejectReason('x'.repeat(500)).length <= 200, 'reason not shortened');
 });
 
 // ---- syncAll (AC20, AC21) --------------------------------------------------------------

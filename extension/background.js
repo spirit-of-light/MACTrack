@@ -57,7 +57,19 @@ async function post(path, body, ctype = 'application/json') {
     headers: { 'Content-Type': ctype, 'X-Token': token || '' },
     body: ctype === 'application/json' ? JSON.stringify(body) : body,
   });
-  if (!r.ok) console.error(`MacTracker: POST ${path} rejected: ${r.status} ${await r.text()}`);
+  if (r.ok) return { ok: true, status: r.status, text: '' };
+  const text = await r.text();
+  console.error(`MacTracker: POST ${path} rejected: ${r.status} ${text}`);
+  return { ok: false, status: r.status, text };
+}
+
+// A sync the server rejects (400) is replaced by a status-only error so the page shows it, not a stale
+// status. One retry only: the error body itself is never retried.
+async function ingest(body, retry = true) {
+  const r = await post('/api/ingest', body);
+  if (r.status === 400 && retry) {
+    await ingest({ source: body.source, status: 'error', error: `server rejected sync: ${rejectReason(r.text)}`, items: [] }, false);
+  }
   return r.ok;
 }
 
@@ -189,7 +201,7 @@ async function sync() {
   const needed = [];
   const results = await syncAll(FETCHERS, (body) => {
     if (body.status === 'login needed') needed.push(body.source);
-    return post('/api/ingest', body);
+    return ingest(body);
   });
   for (const r of results) if (r.status === 'rejected') console.error('MacTracker: sync post failed:', r.reason);
   if (!needed.length) return;
@@ -248,7 +260,7 @@ async function rerun(source) {
   let status = 'error';
   await syncAll({ [source]: FETCHERS[source] }, (body) => {
     status = body.status;
-    return post('/api/ingest', body);
+    return ingest(body);
   });
   return status;
 }

@@ -101,11 +101,14 @@ function applyMarks(items, marks, courseLabel = items[0] && items[0].course) {
 // ---- Simple Syllabus (AC54/AC55) ----
 
 // Grading-table rows (cell texts) -> [{name, weights: [raw % strings]}]; rows without a % cell dropped.
+// A cell that is only a percent ("10%", "1.5 %", "0-5%**"); same shape as server.parse_pct.
+const PCT_CELL = /^\d+(\.\d+)?\s*([-\u2013]\s*\d+(\.\d+)?\s*)?%\s*\**$/;
+
 function ssCategories(rows) {
   return rows
     .map((cells) => cells.map((c) => String(c).trim()))
-    .filter((cells) => cells.slice(1).some((c) => c.includes('%')))
-    .map(([name, ...rest]) => ({ name, weights: rest.filter((c) => c.includes('%')) }));
+    .map(([name, ...rest]) => ({ name, weights: rest.filter((c) => PCT_CELL.test(c)) }))
+    .filter((c) => c.weights.length);
 }
 
 // Final sso-redirect URL -> doc code ("/doc/" stripped), else null.
@@ -192,6 +195,9 @@ function avenueItems({ code, folders = [], subs = {}, quizzes = [], grades: allG
 // ---- Crowdmark (AC24) ----
 
 // assignments JSON:API doc + {assignmentId: results doc} -> items.
+// Crowdmark JSON:API sends totals as strings ("19.5"); missing, blank or junk -> null.
+const num = (v) => (v == null || String(v).trim() === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+
 function crowdmarkItems(assignments, resultsById = {}) {
   const masters = Object.fromEntries((assignments.included || []).map((x) => [x.id, x.attributes || {}]));
   return (assignments.data || []).map((a) => {
@@ -201,11 +207,18 @@ function crowdmarkItems(assignments, resultsById = {}) {
     const res = at['marks-sent-at'] && resultsById[a.id];
     const r = res && res.data && res.data.attributes;
     return { source_id: `assignment:${a.id}`, title: em.title, due: at.due, done: !!at['submitted-at'],
-      mark: r ? r['total-after-penalty'] : null, out_of: r ? em['total-points'] : null };
+      mark: r ? num(r['total-after-penalty']) : null, out_of: r ? num(em['total-points']) : null };
   });
 }
 
 // ---- sync (AC20, AC21) ----
+
+// A rejected POST's response body (Python's error page) -> its short explanation, no tags or URLs.
+function rejectReason(text) {
+  const plain = String(text).replace(/<[^>]*>/g, ' ');
+  const m = /explanation:\s*\d+\s*-\s*(.+?)\.?\s*$/m.exec(plain);
+  return (m ? m[1] : plain).replace(/https?:\/\/\S+/g, '[url]').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
 
 class LoginNeeded extends Error {
   constructor(source) { super(`login needed: ${source}`); this.name = 'LoginNeeded'; }
@@ -303,5 +316,5 @@ async function fallbackSignedIn(source, state, d) {
 
 if (typeof module !== 'undefined') {
   module.exports = { dueDate, childsmathLabel, childsmathLoggedOut, childsmathItems, termStart, parseMarks, applyMarks, ssCategories, ssCode, toolLaunchPath,
-    avenueItems, crowdmarkItems, syncAll, LoginNeeded, SITES, loggedInUrl, quietHour, crowdmarkEntry, renewAll, fallbackSignedIn };
+    avenueItems, crowdmarkItems, syncAll, LoginNeeded, rejectReason, SITES, loggedInUrl, quietHour, crowdmarkEntry, renewAll, fallbackSignedIn };
 }

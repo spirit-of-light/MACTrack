@@ -781,6 +781,7 @@ def test_pct_footnote():
 
     assert server.parse_pct("0-5%**") == server.parse_pct("0-5%") == (5, True), server.parse_pct("0-5%**")
     assert server.parse_pct("10%*") == (10, False), server.parse_pct("10%*")
+    assert server.parse_pct("1.5 %") == (1.5, False), server.parse_pct("1.5 %")  # live bug: space before %
 
 
 # AC15 — a PDF outline is read with pypdf and its weights stored on the course
@@ -1609,6 +1610,17 @@ def test_renewal_waits_for_load():
     assert not re.search(r"\bloggedInUrl\s*\([^)]*change\w*\.url", body), \
         "loggedInUrl checks the changed URL, not the loaded tab's URL"
     assert re.search(r"\bloggedInUrl\s*\([^)]*\btab\.url", body), "loggedInUrl does not check tab.url"
+
+
+# Live bug — a sync the server rejects (400) replaces the stale status with a status-only error, once
+def test_rejected_sync_surfaces():
+    bg = ext("background.js")
+    assert re.search(r"status\s*===?\s*400", bg), "a 400 from /api/ingest is not handled"
+    assert "server rejected sync" in bg, "no status-only error ingest for a rejected sync"
+    assert re.search(r"\brejectReason\s*\(", bg), "the reason is not taken from the server's message"
+    for name in ("sync", "rerun"):
+        assert not re.search(r"post\(\s*['\"]/api/ingest", js_function(bg, name)), \
+            f"{name}() posts ingest without the rejected-sync handling"
 
 
 if __name__ == "__main__":
