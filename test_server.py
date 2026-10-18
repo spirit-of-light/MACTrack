@@ -1931,8 +1931,9 @@ def test_index_hide_courses():
     assert re.search(r"localStorage\.getItem\(\s*['\"]hiddenCourses['\"]", html), "hidden courses not read from localStorage"
     assert re.search(r"localStorage\.setItem\(\s*['\"]hiddenCourses['\"]", html), "hidden courses not saved to localStorage"
     assert not any("hiddenCourses" in a for a in fetch_calls(html)), "hidden courses sent to the server"
-    assert re.search(r"calendar\(data\.items\.filter\(\(i\) => shown\(", html), "calendar does not skip hidden courses"
-    assert re.search(r"courses\.filter\(shown\)", html), "course list does not skip hidden courses"
+    assert re.search(r"calendar\(data\.items\.filter\(\(i\) => visible\.includes\(", html), "calendar does not skip hidden courses"
+    assert re.search(r"courses = editing\(\) \? all : visible", html), "view mode does not skip hidden courses"
+    assert re.search(r"editing\(\) \? \[eye\]", html), "eye button not limited to edit mode"
     assert re.search(r"all\.indexOf\(c\)", html), "course colours shift when a course is hidden"
 
 
