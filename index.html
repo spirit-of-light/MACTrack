@@ -49,6 +49,7 @@
 <p id="sources"></p>
 <p>
   <label>Course <select id="course"><option value="">All</option></select></label>
+  <label>Type <select id="kind"><option value="">All</option></select></label>
   <label>Status <select id="status">
     <option value="">All</option><option value="open">Not done</option><option value="done">Done</option>
     <option value="overdue">Overdue</option><option value="upcoming">Upcoming</option>
@@ -86,6 +87,7 @@ const LOGIN = {
 const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'practice', 'other'];
 const $ = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 const days = () => Number(localStorage.getItem('upcomingDays')) || 7; // AC41/AC42/AC51: browser only
+const round2 = (v) => (v == null ? '' : Math.round(v * 100) / 100); // display only; edit mode keeps the exact value
 const editing = () => localStorage.getItem('editMode') === '1'; // view mode by default; browser only
 const hiddenCourses = () => { try { return JSON.parse(localStorage.getItem('hiddenCourses')) || []; } catch { return []; } }; // browser only
 const setHidden = (list) => { localStorage.setItem('hiddenCourses', JSON.stringify(list)); render(); };
@@ -169,7 +171,7 @@ async function remove(item) {
 function row(item) {
   if (!editing()) { // view mode: plain text, no controls
     const tr = $('tr', {}, ...[item.done ? '✓' : '', (item.title ?? '') + (item.missing ? ' (missing from source)' : ''), item.kind ?? '',
-      item.due ? new Date(item.due).toLocaleString() : '', item.weight == null ? '' : Math.round(item.weight * 100) / 100, item.mark ?? '', item.out_of ?? '',
+      item.due ? new Date(item.due).toLocaleString() : '', round2(item.weight), round2(item.mark), item.out_of ?? '',
       item.progress ?? ''].map((t) => $('td', { textContent: String(t) })));
     tr.classList.toggle('overdue', overdue(item));
     tr.classList.toggle('upcoming', upcoming(item));
@@ -243,7 +245,9 @@ function render() {
   pick.replaceChildren($('option', { value: '', textContent: 'All' }),
     ...courses.map((c) => $('option', { value: c, textContent: c, selected: c === chosen })));
   const want = document.getElementById('status').value;
-  const keep = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue, upcoming }[want];
+  const byStatus = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue, upcoming }[want];
+  const kind = document.getElementById('kind').value;
+  const keep = (i) => byStatus(i) && (!kind || i.kind === kind);
   const colorOf = (c) => `hsl(${(all.indexOf(c) * 137) % 360} 55% 38%)`; // AC26: page-derived course color; hiding keeps colours
   const picked = (c) => !chosen || c === chosen;
   const cal = document.getElementById('calendar');
@@ -281,6 +285,8 @@ editBox.addEventListener('change', () => { localStorage.setItem('editMode', edit
 document.querySelector('#add [name=kind]').append(...KINDS.map((k) => $('option', { value: k, textContent: k })));
 document.getElementById('add').addEventListener('submit', add);
 document.getElementById('status').addEventListener('change', render);
+document.getElementById('kind').append(...KINDS.map((k) => $('option', { value: k, textContent: k })));
+document.getElementById('kind').addEventListener('change', render);
 document.getElementById('cal-back').addEventListener('click', () => { calOffset -= days(); render(); });
 document.getElementById('cal-fwd').addEventListener('click', () => { calOffset += days(); render(); });
 document.getElementById('cal-today').addEventListener('click', () => { calOffset = 0; render(); });

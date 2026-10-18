@@ -1939,6 +1939,13 @@ def test_index_hide_courses():
     assert re.search(r"all\.indexOf\(c\)", html), "course colours shift when a course is hidden"
 
 
+def test_index_kind_filter_and_rounding():
+    html = (ROOT / "index.html").read_text()
+    assert re.search(r"<select id=['\"]kind['\"]", html), "no Type filter"
+    assert re.search(r"const keep = \(i\) => byStatus\(i\) && \(!kind \|\| i\.kind === kind\)", html), "Type filter not applied"
+    assert "round2(item.weight), round2(item.mark)" in html, "weight and mark not rounded in view mode"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:
