@@ -1926,6 +1926,16 @@ def test_index_calendar():
     assert re.search(r"editing\(\)\s*\?\s*\[\s*'Source'", html), "Source column is not edit-mode only"
 
 
+def test_index_hide_courses():
+    html = (ROOT / "index.html").read_text()
+    assert re.search(r"localStorage\.getItem\(\s*['\"]hiddenCourses['\"]", html), "hidden courses not read from localStorage"
+    assert re.search(r"localStorage\.setItem\(\s*['\"]hiddenCourses['\"]", html), "hidden courses not saved to localStorage"
+    assert not any("hiddenCourses" in a for a in fetch_calls(html)), "hidden courses sent to the server"
+    assert re.search(r"calendar\(data\.items\.filter\(\(i\) => shown\(", html), "calendar does not skip hidden courses"
+    assert re.search(r"courses\.filter\(shown\)", html), "course list does not skip hidden courses"
+    assert re.search(r"all\.indexOf\(c\)", html), "course colours shift when a course is hidden"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:

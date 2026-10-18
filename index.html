@@ -40,6 +40,8 @@
   .day h3 { font-size: .9rem; margin: 0 0 .3rem; }
   .day.today h3 { color: var(--primary); }
   .day p { margin: 0 0 .3rem; border-left: 4px solid var(--c); padding-left: .3rem; font-size: .9em; }
+  button.quiet { background: none; color: var(--primary); text-decoration: underline; padding: 0 .3rem; font-size: .85rem; font-weight: normal; }
+  button.quiet:hover { color: var(--primary-hover); background: none; }
   .day p.done { text-decoration: line-through; color: var(--text-muted); }
 </style>
 <h1>MacTracker</h1>
@@ -54,6 +56,7 @@
   <label>Upcoming window (days) <input id="days" type="number" min="1" style="width:4em"></label>
   <label><input id="edit" type="checkbox"> Edit mode</label>
 </p>
+<p id="hidden-courses"></p>
 <form id="add">
   <strong>Add item</strong>
   <input name="course" list="known-courses" placeholder="Course" required>
@@ -85,6 +88,8 @@ const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework
 const $ = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 const days = () => Number(localStorage.getItem('upcomingDays')) || 7; // AC41/AC42/AC51: browser only
 const editing = () => localStorage.getItem('editMode') === '1'; // view mode by default; browser only
+const hiddenCourses = () => { try { return JSON.parse(localStorage.getItem('hiddenCourses')) || []; } catch { return []; } }; // browser only
+const setHidden = (list) => { localStorage.setItem('hiddenCourses', JSON.stringify(list)); render(); };
 let data = { items: [], courses: {} };
 let status = {};
 let calOffset = 0; // calendar start, in days from today; not saved
@@ -216,20 +221,28 @@ function render() {
   document.getElementById('sources').textContent = Object.entries(status)
     .map(([src, s]) => `${src}: ${s.status}, synced ${new Date(s.synced_at).toLocaleString()}`).join(' · ');
 
-  const courses = [...new Set(data.items.map((i) => i.course ?? '(no course)'))].sort();
+  const all = [...new Set(data.items.map((i) => i.course ?? '(no course)'))].sort();
+  const hidden = hiddenCourses();
+  const courses = all.filter((c) => !hidden.includes(c));
+  const shownHidden = all.filter((c) => hidden.includes(c));
+  const bar = document.getElementById('hidden-courses');
+  bar.hidden = !shownHidden.length;
+  bar.replaceChildren('Hidden courses:', ...shownHidden.map((c) => $('button', { className: 'quiet', textContent: `Show ${c}`,
+    onclick: () => setHidden(hidden.filter((h) => h !== c)) })));
   document.getElementById('known-courses').replaceChildren(
-    ...courses.filter((c) => c !== '(no course)').map((c) => $('option', { value: c })));
+    ...all.filter((c) => c !== '(no course)').map((c) => $('option', { value: c })));
   const pick = document.getElementById('course');
   const chosen = pick.value;
   pick.replaceChildren($('option', { value: '', textContent: 'All' }),
     ...courses.map((c) => $('option', { value: c, textContent: c, selected: c === chosen })));
   const want = document.getElementById('status').value;
   const keep = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue, upcoming }[want];
-  const colorOf = (c) => `hsl(${(courses.indexOf(c) * 137) % 360} 55% 38%)`; // AC26: page-derived course color
+  const colorOf = (c) => `hsl(${(all.indexOf(c) * 137) % 360} 55% 38%)`; // AC26: page-derived course color; hiding keeps colours
+  const shown = (c) => courses.includes(c) && (!chosen || c === chosen);
   const cal = document.getElementById('calendar');
-  cal.replaceChildren(...calendar(data.items.filter((i) => (!chosen || (i.course ?? '(no course)') === chosen) && keep(i)), colorOf));
+  cal.replaceChildren(...calendar(data.items.filter((i) => shown(i.course ?? '(no course)') && keep(i)), colorOf));
 
-  document.getElementById('list').replaceChildren(...courses.filter((c) => !chosen || c === chosen).map((c) => {
+  document.getElementById('list').replaceChildren(...courses.filter(shown).map((c) => {
     const g = data.courses[c] || { grade: null, graded_pct: 0 };
     const summary = [...(g.grade == null ? [] : [`${g.grade.toFixed(1)}%`]), `${(g.graded_pct || 0).toFixed(0)}% Graded`,
       ...(g.approximate ? ['approximate'] : [])].join(' | ');
@@ -238,7 +251,8 @@ function render() {
       ...(editing() ? ['Source', ''] : [])]
       .map((h) => $('th', { textContent: h })));
     const info = (g.info || []).map((i) => `${i.name}: ${i.value}`).join(' · '); // AC91
-    const s = $('section', {}, $('h2', { textContent: `${c} | ${summary}` }),
+    const s = $('section', {}, $('h2', {}, `${c} | ${summary}`,
+      $('button', { className: 'quiet', textContent: 'Hide', onclick: () => setHidden([...hidden, c]) })),
       ...(info ? [$('p', { className: 'info', textContent: info })] : []),
       $('table', {}, $('thead', {}, head), $('tbody', {}, ...rows.map(row))));
     s.style.setProperty('--c', colorOf(c));
