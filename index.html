@@ -3,21 +3,34 @@
 <meta charset="utf-8">
 <title>MacTracker</title>
 <style>
-  body { font: 14px system-ui, sans-serif; margin: 1.5rem; color: #222; }
-  .banner { background: #fde2e1; border: 1px solid #e0a3a0; padding: .4rem .6rem; margin: .3rem 0; }
-  #sources { color: #666; }
+  /* Tokens: ai-factory/designs/frontend.md */
+  :root {
+    --primary: #7A013C; --primary-hover: #5E012E; --primary-tint: #F6E6EE; --on-primary: #FFFFFF;
+    --bg: #FFFFFF; --surface: #FAFAFA; --text: #222222; --text-muted: #666666; --text-faint: #888888; --border: #EEEEEE;
+    --overdue-bg: #FBD5D5; --upcoming-bg: #FFF3C4; --banner-bg: #FDE2E1; --banner-border: #E0A3A0;
+  }
+  body { font: 14px system-ui, sans-serif; margin: 1.5rem; color: var(--text); background: var(--bg); }
+  h1 { color: var(--primary); font-size: 1.5rem; }
+  a { color: var(--primary); }
+  :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  button { background: var(--primary); color: var(--on-primary); border: 0; border-radius: 4px; padding: .25rem .7rem; font: inherit; cursor: pointer; }
+  button:hover, button:active { background: var(--primary-hover); }
+  p:has(#edit), #add { background: var(--surface); padding: .4rem .6rem; }
+  p:has(#edit:checked) { background: var(--primary-tint); }
+  .banner { background: var(--banner-bg); border: 1px solid var(--banner-border); padding: .4rem .6rem; margin: .3rem 0; }
+  #sources { color: var(--text-muted); }
   section { border-left: 6px solid var(--c); padding-left: .8rem; margin: 1.2rem 0; }
   h2 { color: var(--c); margin: 0 0 .2rem; font-size: 1.1rem; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: .15rem .3rem; border-bottom: 1px solid #eee; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: .15rem .3rem; border-bottom: 1px solid var(--border); }
   td input { width: 100%; box-sizing: border-box; font: inherit; }
   td input[type=number] { width: 5em; }
   td input[type=checkbox] { width: auto; }
-  tr.overdue { background: #fbd5d5; }
-  tr.upcoming { background: #fff3c4; }
+  tr.overdue { background: var(--overdue-bg); }
+  tr.upcoming { background: var(--upcoming-bg); }
   tr.missing { opacity: .55; }
-  .src { color: #888; font-size: .85em; }
-  .info { color: #555; margin: 0 0 .3rem; }
+  .src { color: var(--text-faint); font-size: .85em; }
+  .info { color: var(--text-muted); margin: 0 0 .3rem; }
 </style>
 <h1>MacTracker</h1>
 <div id="banners"></div>
