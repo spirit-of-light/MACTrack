@@ -1901,6 +1901,20 @@ def test_index_manual_items():
     assert re.search(r"source\s*===\s*['\"]manual['\"]", html), "delete not limited to manual rows"
     assert "Add item" in html and "datetime-local" in html and "innerHTML" not in html
 
+
+# Quick (view/edit mode) — view mode by default, remembered in localStorage only; the add form and
+# the row editors appear only in edit mode
+def test_index_view_edit_mode():
+    html = (ROOT / "index.html").read_text()
+    assert re.search(r"localStorage\.getItem\(\s*['\"]editMode['\"]\s*\)", html), "edit mode not read from localStorage"
+    assert re.search(r"localStorage\.setItem\(\s*['\"]editMode['\"]", html), "edit mode not saved to localStorage"
+    assert not any("editMode" in a for a in fetch_calls(html)), "edit mode sent to the server"
+    assert re.search(r"id=['\"]edit['\"]", html) and "Edit mode" in html, "no Edit mode toggle"
+    assert re.search(r"getElementById\(\s*['\"]add['\"]\s*\)\.hidden\s*=", html), "add form not hidden in view mode"
+    row = re.search(r"function row\(item\)\s*\{(.*?)\n\}", html, re.S)[1]
+    assert re.search(r"if\s*\(\s*!editing\(\)\s*\)", row), "row() has no plain view branch"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:

@@ -29,6 +29,7 @@
     <option value="overdue">Overdue</option><option value="upcoming">Upcoming</option>
   </select></label>
   <label>Upcoming window (days) <input id="days" type="number" min="1" style="width:4em"></label>
+  <label><input id="edit" type="checkbox"> Edit mode</label>
 </p>
 <form id="add">
   <strong>Add item</strong>
@@ -54,6 +55,7 @@ const LOGIN = {
 const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'practice', 'other'];
 const $ = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 const days = () => Number(localStorage.getItem('upcomingDays')) || 7; // AC41/AC42/AC51: browser only
+const editing = () => localStorage.getItem('editMode') === '1'; // view mode by default; browser only
 let data = { items: [], courses: {} };
 let status = {};
 
@@ -119,6 +121,16 @@ async function remove(item) {
 }
 
 function row(item) {
+  if (!editing()) { // view mode: plain text, no controls
+    const tr = $('tr', {}, ...[item.done ? '✓' : '', item.title ?? '', item.kind ?? '',
+      item.due ? new Date(item.due).toLocaleString() : '', item.weight ?? '', item.mark ?? '', item.out_of ?? '',
+      item.progress ?? ''].map((t) => $('td', { textContent: String(t) })),
+      $('td', { className: 'src', textContent: item.source + (item.missing ? ' · missing from source' : '') }));
+    tr.classList.toggle('overdue', overdue(item));
+    tr.classList.toggle('upcoming', upcoming(item));
+    tr.classList.toggle('missing', !!item.missing);
+    return tr;
+  }
   const inputs = {
     done: $('input', { type: 'checkbox', checked: !!item.done }),
     title: $('input', { value: item.title ?? '' }),
@@ -141,6 +153,7 @@ function row(item) {
 }
 
 function render() {
+  document.getElementById('add').hidden = !editing();
   // AC30: one banner per source that needs attention; the other sources still render below.
   document.getElementById('banners').replaceChildren(...Object.entries(status)
     .filter(([, s]) => s.status !== 'ok')
@@ -167,7 +180,8 @@ function render() {
     const summary = `${g.grade == null ? '—' : `${g.grade.toFixed(1)}%`} · ${(g.graded_pct || 0).toFixed(0)}% graded`
       + (g.approximate ? ' · approximate' : '');
     const rows = data.items.filter((i) => (i.course ?? '(no course)') === c && keep(i)).sort((a, b) => dueMs(a) - dueMs(b));
-    const head = $('tr', {}, ...['Done', 'Title', 'Kind', 'Due', 'Weight', 'Mark', 'Out of', 'Progress', 'Source', '']
+    const head = $('tr', {}, ...['Done', 'Title', 'Kind', 'Due', 'Weight', 'Mark', 'Out of', 'Progress', 'Source',
+      ...(editing() ? [''] : [])]
       .map((h) => $('th', { textContent: h })));
     const info = (g.info || []).map((i) => `${i.name}: ${i.value}`).join(' · '); // AC91
     const s = $('section', {}, $('h2', { textContent: `${c} — ${summary}` }),
@@ -182,6 +196,9 @@ const daysInput = document.getElementById('days');
 daysInput.value = days();
 daysInput.addEventListener('change', () => { localStorage.setItem('upcomingDays', daysInput.value); render(); });
 document.getElementById('course').addEventListener('change', render);
+const editBox = document.getElementById('edit');
+editBox.checked = editing();
+editBox.addEventListener('change', () => { localStorage.setItem('editMode', editBox.checked ? '1' : '0'); render(); });
 document.querySelector('#add [name=kind]').append(...KINDS.map((k) => $('option', { value: k, textContent: k })));
 document.getElementById('add').addEventListener('submit', add);
 document.getElementById('status').addEventListener('change', render);
