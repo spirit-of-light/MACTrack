@@ -234,6 +234,9 @@ def merged_items(db):
             out.append(r)
             continue
         kept["_sources"].add(r["source"])
+        if kept.get("mark") is None and r.get("mark") is not None:
+            # A mark only means something with its own out_of: take both from the same row.
+            kept["mark"], kept["out_of"] = r["mark"], r.get("out_of")
         for f, v in r.items():  # AC37/AC89: fill the kept row's empty fields, due included
             if kept.get(f) is None:
                 kept[f] = v

@@ -568,6 +568,18 @@ def test_merge_fills_empty():
         assert bool(r["done"]) is True, r
 
 
+# Fix — mark and out_of are filled as a pair: an unmarked Avenue gradebook row (out of 20) merged
+# with a marked childsmath row (13/13) shows 13/13, not 13/20 (MATH 1B03 Assignment 1)
+def test_merge_mark_out_of_pair():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [{"course": "MATH_1B03_x_2269", "source_id": "grade:1", "title": "Assignment 1", "out_of": 20}])
+        ingest_ok(s, "childsmath", [{"course": "Math 1B03 F26", "source_id": "Math 1B03 F26:Assignment #1",
+                                     "title": "Assignment #1", "mark": 13, "out_of": 13}])
+        rows = in_course(get_items(s), "MATH 1B03")
+        assert len(rows) == 1, rows
+        assert (rows[0]["source"], rows[0]["mark"], rows[0]["out_of"]) == ("avenue", 13, 13), rows[0]
+
+
 def two_overridden_rows(s, av_fields, cm_fields):
     """Ingest AV far from CM so both rows are visible, override each, then re-ingest AV so they merge."""
     ingest_ok(s, "avenue", [dict(AV, due=FAR)])
