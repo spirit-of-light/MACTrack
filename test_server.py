@@ -1915,6 +1915,17 @@ def test_index_view_edit_mode():
     assert re.search(r"if\s*\(\s*!editing\(\)\s*\)", row), "row() has no plain view branch"
 
 
+def test_index_calendar():
+    html = (ROOT / "index.html").read_text()
+    for id_ in ("calendar", "cal-back", "cal-fwd", "cal-today"):
+        assert re.search(rf"id=['\"]{id_}['\"]", html), f"no #{id_}"
+    cal = re.search(r"function calendar\(.*?\n\}", html, re.S)[0]
+    assert "days()" in cal, "calendar length is not the upcoming window N"
+    assert re.search(r"calOffset\s*-=\s*days\(\)", html) and re.search(r"calOffset\s*\+=\s*days\(\)", html), "arrows do not move by N days"
+    assert re.search(r"calOffset\s*=\s*0\b", html), "Today button does not reset the calendar"
+    assert re.search(r"editing\(\)\s*\?\s*\[\s*'Source'", html), "Source column is not edit-mode only"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:

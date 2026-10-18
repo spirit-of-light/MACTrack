@@ -31,6 +31,14 @@
   tr.missing { opacity: .55; }
   .src { color: var(--text-faint); font-size: .85em; }
   .info { color: var(--text-muted); margin: 0 0 .3rem; }
+  #cal-nav { display: flex; gap: .3rem; margin: 1rem 0 .4rem; }
+  #calendar { display: grid; grid-template-columns: repeat(var(--n), minmax(8rem, 1fr)); overflow-x: auto; border: 1px solid var(--border); }
+  .day { border-left: 1px solid var(--border); padding: .3rem .4rem; min-height: 5rem; }
+  .day:first-child { border-left: 0; }
+  .day h3 { font-size: .9rem; margin: 0 0 .3rem; }
+  .day.today h3 { color: var(--primary); }
+  .day p { margin: 0 0 .3rem; border-left: 4px solid var(--c); padding-left: .3rem; font-size: .9em; }
+  .day p.done { text-decoration: line-through; color: var(--text-muted); }
 </style>
 <h1>MacTracker</h1>
 <div id="banners"></div>
@@ -56,6 +64,12 @@
   <input name="out_of" type="number" step="any" placeholder="Out of" style="width:5em">
   <button>Add</button>
 </form>
+<nav id="cal-nav">
+  <button id="cal-back" aria-label="Previous days">←</button>
+  <button id="cal-today">Today</button>
+  <button id="cal-fwd" aria-label="Next days">→</button>
+</nav>
+<div id="calendar"></div>
 <main id="list"></main>
 <script>
 'use strict';
@@ -71,6 +85,7 @@ const days = () => Number(localStorage.getItem('upcomingDays')) || 7; // AC41/AC
 const editing = () => localStorage.getItem('editMode') === '1'; // view mode by default; browser only
 let data = { items: [], courses: {} };
 let status = {};
+let calOffset = 0; // calendar start, in days from today; not saved
 
 const dueMs = (i) => (i.due ? new Date(i.due).getTime() : Infinity);
 const overdue = (i) => !i.done && dueMs(i) < Date.now();
@@ -135,10 +150,9 @@ async function remove(item) {
 
 function row(item) {
   if (!editing()) { // view mode: plain text, no controls
-    const tr = $('tr', {}, ...[item.done ? '✓' : '', item.title ?? '', item.kind ?? '',
+    const tr = $('tr', {}, ...[item.done ? '✓' : '', (item.title ?? '') + (item.missing ? ' (missing from source)' : ''), item.kind ?? '',
       item.due ? new Date(item.due).toLocaleString() : '', item.weight == null ? '' : Math.round(item.weight * 100) / 100, item.mark ?? '', item.out_of ?? '',
-      item.progress ?? ''].map((t) => $('td', { textContent: String(t) })),
-      $('td', { className: 'src', textContent: item.source + (item.missing ? ' · missing from source' : '') }));
+      item.progress ?? ''].map((t) => $('td', { textContent: String(t) })));
     tr.classList.toggle('overdue', overdue(item));
     tr.classList.toggle('upcoming', upcoming(item));
     tr.classList.toggle('missing', !!item.missing);
@@ -165,6 +179,29 @@ function row(item) {
   return tr;
 }
 
+// Next days() days from today + calOffset, each with the items due that local day.
+function calendar(items, colorOf) {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() + calOffset);
+  return Array.from({ length: days() }, (_, k) => {
+    const from = new Date(start);
+    from.setDate(start.getDate() + k);
+    const to = new Date(from);
+    to.setDate(from.getDate() + 1);
+    const today = calOffset + k === 0;
+    const label = from.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    return $('div', { className: today ? 'day today' : 'day' },
+      $('h3', { textContent: today ? `${label} (today)` : label }),
+      ...items.filter((i) => dueMs(i) >= from && dueMs(i) < to).sort((a, b) => dueMs(a) - dueMs(b)).map((i) => {
+        const c = i.course ?? '(no course)';
+        const p = $('p', { className: i.done ? 'done' : '' }, $('b', { textContent: c }), ` ${i.title ?? ''}`);
+        p.style.setProperty('--c', colorOf(c));
+        return p;
+      }));
+  });
+}
+
 function render() {
   document.getElementById('add').hidden = !editing();
   // AC30: one banner per source that needs attention; the other sources still render below.
@@ -186,21 +223,24 @@ function render() {
     ...courses.map((c) => $('option', { value: c, textContent: c, selected: c === chosen })));
   const want = document.getElementById('status').value;
   const keep = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue, upcoming }[want];
+  const colorOf = (c) => `hsl(${(courses.indexOf(c) * 137) % 360} 55% 38%)`; // AC26: page-derived course color
+  const cal = document.getElementById('calendar');
+  cal.style.setProperty('--n', days());
+  cal.replaceChildren(...calendar(data.items.filter((i) => (!chosen || (i.course ?? '(no course)') === chosen) && keep(i)), colorOf));
 
   document.getElementById('list').replaceChildren(...courses.filter((c) => !chosen || c === chosen).map((c) => {
-    const color = `hsl(${(courses.indexOf(c) * 137) % 360} 55% 38%)`; // AC26: page-derived course color
     const g = data.courses[c] || { grade: null, graded_pct: 0 };
     const summary = [...(g.grade == null ? [] : [`${g.grade.toFixed(1)}%`]), `${(g.graded_pct || 0).toFixed(0)}% Graded`,
       ...(g.approximate ? ['approximate'] : [])].join(' | ');
     const rows = data.items.filter((i) => (i.course ?? '(no course)') === c && keep(i)).sort((a, b) => dueMs(a) - dueMs(b));
-    const head = $('tr', {}, ...['Done', 'Title', 'Kind', 'Due', 'Weight', 'Mark', 'Out of', 'Progress', 'Source',
-      ...(editing() ? [''] : [])]
+    const head = $('tr', {}, ...['Done', 'Title', 'Kind', 'Due', 'Weight', 'Mark', 'Out of', 'Progress',
+      ...(editing() ? ['Source', ''] : [])]
       .map((h) => $('th', { textContent: h })));
     const info = (g.info || []).map((i) => `${i.name}: ${i.value}`).join(' · '); // AC91
     const s = $('section', {}, $('h2', { textContent: `${c} | ${summary}` }),
       ...(info ? [$('p', { className: 'info', textContent: info })] : []),
       $('table', {}, $('thead', {}, head), $('tbody', {}, ...rows.map(row))));
-    s.style.setProperty('--c', color);
+    s.style.setProperty('--c', colorOf(c));
     return s;
   }));
 }
@@ -215,6 +255,9 @@ editBox.addEventListener('change', () => { localStorage.setItem('editMode', edit
 document.querySelector('#add [name=kind]').append(...KINDS.map((k) => $('option', { value: k, textContent: k })));
 document.getElementById('add').addEventListener('submit', add);
 document.getElementById('status').addEventListener('change', render);
+document.getElementById('cal-back').addEventListener('click', () => { calOffset -= days(); render(); });
+document.getElementById('cal-fwd').addEventListener('click', () => { calOffset += days(); render(); });
+document.getElementById('cal-today').addEventListener('click', () => { calOffset = 0; render(); });
 load();
 </script>
 </html>
