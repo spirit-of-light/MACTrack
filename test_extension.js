@@ -545,6 +545,24 @@ test('0002 AC21 + AC24 crowdmarkEntry: first Crowdmark-titled lti topic, prefixe
     'https://avenue.cllmcmaster.ca' + CM_LTI, 'title match is case-insensitive and the first hit wins');
 });
 
+test('Review crowdmarkEntry: a topic Url that resolves off the Avenue origin or outside /d2l/ is skipped', () => {
+  for (const bad of ['@evil.example/x?type=lti', '.evil.example/x?type=lti', 'https://evil.example/d2l/x?type=lti',
+    '//evil.example/d2l/x?type=lti']) {
+    assert.equal(P.crowdmarkEntry([{ Title: 'Crowdmark', Url: bad }]), null, bad);
+    assert.equal(P.crowdmarkEntry([{ Title: 'Crowdmark', Url: bad }, { Title: 'Crowdmark', Url: CM_LTI }]),
+      'https://avenue.cllmcmaster.ca' + CM_LTI, `${bad} then a valid topic`);
+  }
+});
+
+test('Review avenueLtiUrl: only an Avenue /d2l/ LTI URL passes (stored entry re-check)', () => {
+  assert.equal(P.avenueLtiUrl('https://avenue.cllmcmaster.ca' + CM_LTI), 'https://avenue.cllmcmaster.ca' + CM_LTI);
+  assert.equal(P.avenueLtiUrl(CM_LTI), 'https://avenue.cllmcmaster.ca' + CM_LTI, 'relative path resolves on Avenue');
+  for (const bad of ['https://avenue.cllmcmaster.ca@evil.example/d2l/x?type=lti', 'https://evil.example/d2l/x?type=lti',
+    'https://avenue.cllmcmaster.ca/content/x?type=lti', 'https://avenue.cllmcmaster.ca/d2l/x', '', null, undefined, 'http://[bad']) {
+    assert.equal(P.avenueLtiUrl(bad), null, String(bad));
+  }
+});
+
 test('0002 AC24 crowdmarkEntry: a Crowdmark-titled topic without type=lti is skipped; no match gives null', () => {
   assert.equal(P.crowdmarkEntry([{ Title: 'Crowdmark', Url: '/content/crowdmark-instructions.html' }]), null);
   assert.equal(P.crowdmarkEntry([
@@ -774,6 +792,32 @@ test('0002 renewal tab closed by the student: no fallback entry, no notification
   assert.deepEqual(state.fallback, {});
   assert.deepEqual(calls.notify, []);
   assert.deepEqual(calls.rerun, ['childsmath']);
+});
+
+test('Review skipped sources survive a quiet sync and are retried after the fallback sign-in', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ now: at(22, 0), open: (s) => (s === 'avenue' ? { tabId: 7 } : { ok: true }) });
+  await P.renewAll(['avenue', 'childsmath'], state, d);
+  assert.deepEqual(state.skipped, ['childsmath']);
+  d.clock = at(1, 0);
+  await P.renewAll(['avenue', 'childsmath'], state, d);
+  assert.deepEqual(state.skipped, ['childsmath'], 'a quiet sync dropped the skipped list');
+  d.clock = at(7, 0);
+  calls.open.length = 0;
+  await P.fallbackSignedIn('avenue', state, d);
+  assert.deepEqual(calls.open, ['childsmath']);
+  assert.deepEqual(state.skipped, []);
+});
+
+test('Review fallback sign-in while a renewal run is busy keeps the skipped list', async () => {
+  const state = newState();
+  const { d, calls } = fakeBrowser({ open: () => ({ tabId: 7 }) });
+  await P.renewAll(['avenue', 'childsmath'], state, d);
+  calls.open.length = 0;
+  state.busy = true;
+  await P.fallbackSignedIn('avenue', state, d);
+  assert.deepEqual(calls.open, []);
+  assert.deepEqual(state.skipped, ['childsmath'], 'skipped list lost while busy');
 });
 
 test('0002 AC9 one source needs sign-in: the other two are posted ok with their items before syncAll resolves', async () => {

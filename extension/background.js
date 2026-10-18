@@ -270,7 +270,7 @@ const fallbackSource = (tabId) => Object.keys(renewal.fallback).find((s) => rene
 // AC22/AC23/AC25: a static entry, or the Crowdmark entry avenue() discovered (AC24).
 async function entry(source) {
   if (source !== 'crowdmark') return SITES[source].login;
-  return (await browser.storage.session.get('crowdmarkEntry')).crowdmarkEntry || null;
+  return avenueLtiUrl((await browser.storage.session.get('crowdmarkEntry')).crowdmarkEntry); // re-checked (review)
 }
 
 // AC2/AC3/AC10: an inactive tab on the entry URL; {ok:true} once it reaches a logged-in URL, else {tabId} after 45 s.
@@ -294,9 +294,8 @@ function endRenewal(tabId, result) {
 // AC3/AC4: sync one source again; its posted status decides what renewal does next.
 async function rerun(source) {
   let status = 'error';
-  await syncAll({ [source]: FETCHERS[source] }, (body) => {
-    status = body.status;
-    return ingest(body);
+  await syncAll({ [source]: FETCHERS[source] }, async (body) => {
+    status = (await ingest(body)) ? body.status : 'error'; // AC29: a rejected re-sync is not ok
   });
   return status;
 }

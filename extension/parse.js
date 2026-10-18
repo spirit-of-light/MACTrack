@@ -278,10 +278,22 @@ function loggedInUrl(source, url) {
 // AC6: quiet window is local 23:00 inclusive to 06:00 exclusive.
 const quietHour = (date) => date.getHours() >= 23 || date.getHours() < 6;
 
-// AC24: first topic titled like Crowdmark whose Url is an LTI launch, as an absolute Avenue URL.
+// An LTI launch URL on Avenue under /d2l/ (absolute or relative), else null. Guards the Crowdmark entry
+// against a topic Url or stored value that would open a tab off Avenue ("@evil.example/…", "//evil…").
+function avenueLtiUrl(url) {
+  if (!url) return null;
+  let u;
+  try { u = new URL(url, SITES.avenue.origin); } catch { return null; }
+  return u.origin === SITES.avenue.origin && u.pathname.startsWith('/d2l/') && /type=lti/.test(u.search) ? u.href : null;
+}
+
+// AC24: first topic titled like Crowdmark whose Url is an Avenue LTI launch, as an absolute Avenue URL.
 function crowdmarkEntry(topics) {
-  const t = (topics || []).find((x) => /crowdmark/i.test(x.Title || '') && /type=lti/.test(x.Url || ''));
-  return t ? SITES.avenue.origin + t.Url : null;
+  for (const t of topics || []) {
+    const url = /crowdmark/i.test(t.Title || '') && avenueLtiUrl(t.Url);
+    if (url) return url;
+  }
+  return null;
 }
 
 const RENEW_ORDER = ['avenue', 'crowdmark', 'childsmath']; // AC26: Crowdmark signs in through Avenue
@@ -289,11 +301,13 @@ const RENEW_ORDER = ['avenue', 'crowdmark', 'childsmath']; // AC26: Crowdmark si
 // Plan 0002 Step 3: renew login-needed sources one at a time in background tabs.
 // d = { now() -> Date, entry(source) -> URL | null, open(source) -> {ok:true} | {tabId},
 //       rerun(source) -> posted status, notify(sources) }; state = { fallback: {source: tabId}, skipped, busy }.
+// Returns false when another run is busy (nothing done).
 async function renewAll(sources, state, d) {
-  if (state.busy) return; // an alarm sync and a click sync never open two tabs for one source
+  if (state.busy) return false; // an alarm sync and a click sync never open two tabs for one source
   state.busy = true;
   const affected = [];
   const skipped = [];
+  const handled = new Set(); // sources this run opened a tab for or notified
   let fellBack = false;
   try {
     for (const source of RENEW_ORDER.filter((s) => sources.includes(s))) {
@@ -302,29 +316,32 @@ async function renewAll(sources, state, d) {
       if (fellBack) { skipped.push(source); affected.push(source); continue; } // AC11
       // AC30: Crowdmark signs in through Avenue; retried once Avenue's fallback sign-in succeeds
       if (source === 'crowdmark' && 'avenue' in state.fallback) { skipped.push(source); continue; }
+      handled.add(source);
       if (!(await d.entry(source))) { affected.push(source); continue; } // Crowdmark not yet discovered: not an IdP failure
       const r = await d.open(source);
       if (r && r.ok) await d.rerun(source); // AC3; a rerun never renews again (AC5)
       else if (r && r.closed) continue; // the student closed the renewal tab: no fallback, the next sync retries
       else { state.fallback[source] = r.tabId; affected.push(source); fellBack = true; } // AC10
     }
-    state.skipped = skipped;
+    // Merge: sources still waiting (e.g. passed over in the quiet window) stay; handled ones leave.
+    const waiting = new Set([...(state.skipped || []).filter((s) => !handled.has(s)), ...skipped]);
+    state.skipped = RENEW_ORDER.filter((s) => waiting.has(s));
     if (affected.length) await d.notify(affected);
   } finally {
     state.busy = false;
   }
+  return true;
 }
 
 // AC13/AC11: the student signed in through a fallback tab. Not ok yet: keep tracking that tab, retry nothing.
 async function fallbackSignedIn(source, state, d) {
   if ((await d.rerun(source)) !== 'ok') return;
   delete state.fallback[source];
-  const skipped = state.skipped;
-  state.skipped = [];
-  await renewAll(skipped, state, d);
+  // renewAll removes only the sources it handles, so a busy run leaves the list as it was.
+  await renewAll([...(state.skipped || [])], state, d);
 }
 
 if (typeof module !== 'undefined') {
   module.exports = { dueDate, childsmathLabel, childsmathLoggedOut, childsmathItems, termStart, parseMarks, applyMarks, ssCategories, ssCode, ssDocCodes, toolLaunchPath,
-    avenueItems, crowdmarkItems, syncAll, LoginNeeded, rejectReason, SITES, loggedInUrl, quietHour, crowdmarkEntry, renewAll, fallbackSignedIn };
+    avenueItems, crowdmarkItems, syncAll, LoginNeeded, rejectReason, SITES, loggedInUrl, quietHour, avenueLtiUrl, crowdmarkEntry, renewAll, fallbackSignedIn };
 }

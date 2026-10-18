@@ -879,6 +879,33 @@ def test_outline_needs_token():
 
 
 # AC64 + AC54 (server side) — JSON {course, categories} stored without pypdf, under the AC62 course key
+# Review — a "Total 100%" line or row is not a category (PDF/DOCX text and Simple Syllabus JSON)
+def test_outline_total_skipped():
+    with InProcess() as s:
+        post_outline_ok(s, "MATH 1ZA3", tiny_pdf((OUTLINE_TEXT + "Total ........ 100%\n").splitlines()), "application/pdf")
+        assert course_weights(s, "MATH 1ZA3")["schemes"] == [{"Assignments": 20, "Midterm Test": 30, "Final Exam": 50}]
+        post_outline_ok(s, "COMPSCI 1MD3", cats(("Labs", "40%"), ("Exam", "60%"), ("Total:", "100%")))
+        assert course_weights(s, "COMPSCI 1MD3")["schemes"] == [{"Labs": 40, "Exam": 60}]
+    import server
+    assert server.outline_categories("Labs\t40%\nTotal\t100%")[-1]["name"] == "Total"  # the row is read; storage skips it
+    with InProcess() as s:
+        post_outline_ok(s, "COMPSCI 1MD3", tiny_docx(), DOCX)  # control
+        doc = (f'<w:document xmlns:w="{W}"><w:body><w:tbl>'
+               + "".join(f"<w:tr><w:tc><w:p><w:r><w:t>{a}</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>{b}</w:t></w:r></w:p></w:tc></w:tr>"
+                         for a, b in (("Labs", "40%"), ("Exam", "60%"), ("Total", "100%")))
+               + "</w:tbl></w:body></w:document>")
+        post_outline_ok(s, "COMPSCI 1MD3", tiny_docx(doc), DOCX)
+        assert course_weights(s, "COMPSCI 1MD3")["schemes"] == [{"Labs": 40, "Exam": 60}]
+
+
+# Review AC29 — a renewal re-sync the server rejected is not reported as ok
+def test_rerun_rejected_is_error():
+    body = js_function(ext("background.js"), "rerun")
+    assert re.search(r"ingest\(", body), "rerun() does not post through ingest()"
+    assert re.search(r"\?\s*body\.status\s*:\s*'error'|if\s*\(\s*!\s*(?:await\s+)?\w+\s*\)\s*status\s*=\s*'error'", body), \
+        "rerun() reports the posted status even when the server rejected it"
+
+
 def test_outline_json():
     with InProcess() as s, no_pypdf():
         post_outline_ok(s, "MATH_1ZA3_x_2269", cats(("Assignments", "20%"), ("Final Exam", "80%")))

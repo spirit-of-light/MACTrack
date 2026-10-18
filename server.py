@@ -428,6 +428,10 @@ def store_outline(db, course, categories):
         and isinstance(cat.get("weights"), list) and cat["weights"] for cat in categories
     ):
         raise ValueError("need categories [{name, weights: [pct, ...]}]")
+    # A "Total 100%" line or row sums the table; it is not a category (PDF, DOCX and Simple Syllabus alike).
+    categories = [cat for cat in categories if norm_title(cat["name"], None) != "total"]
+    if not categories:
+        raise ValueError("need categories [{name, weights: [pct, ...]}]")
     parsed = {cat["name"].strip(): [parse_pct(w) for w in cat["weights"]] for cat in categories}
     n = max(len(ws) for ws in parsed.values())
     # A row with fewer columns than the table repeats its last weight in the later schemes.
