@@ -158,6 +158,8 @@ def ingest(db, body):
                     f"ON CONFLICT(source, source_id) DO UPDATE SET {sets}",
                     (source, str(i["source_id"]), *row.values()),
                 )
+            # Practice items are never due, so they are not tracked; this also clears ones stored before.
+            c.execute("DELETE FROM items WHERE source = ? AND kind = 'practice'", (source,))
             c.execute(
                 "INSERT OR REPLACE INTO status VALUES (?, ?, ?, ?)",
                 (source, status, body.get("error") if status == "error" else None, now),

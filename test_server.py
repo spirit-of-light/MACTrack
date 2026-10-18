@@ -1401,7 +1401,7 @@ def test_dedup_priority_crowdmark_over_childsmath():
         assert (r["source"], r["due"], r["progress"], r["mark"]) == ("crowdmark", "2026-09-20T03:59:00Z", "8/8", 7), r
 
 
-# AC90 — a "practice" outline category becomes a placeholder (no kind bucket); practice items still get no weight
+# AC90 — a "practice" outline category becomes a placeholder (no kind bucket); practice items are not stored
 def test_practice_category_placeholder():
     with InProcess() as s:
         post_outline_ok(s, "MATH 1ZA3", cats(("Assignments", "95%"), ("Practice Quizzes", "5%")))
@@ -1410,8 +1410,7 @@ def test_practice_category_placeholder():
         items = in_course(get_items(s), "MATH 1ZA3")
         ph = [i for i in items if i["title"] == "Practice Quizzes"]
         assert len(ph) == 1 and ph[0]["source"] == "outline", ph
-        p1 = by_sid(items, "avenue")["p1"]
-        assert p1["weight"] is None, p1
+        assert "p1" not in by_sid(items, "avenue"), items
         assert sum(course_weights(s, "MATH 1ZA3")["schemes"][0].values()) == 100
         c = get_courses(s)["MATH 1ZA3"]
         assert near(c["grade"], 60), c  # only Assignment 1 counts: 6/10
@@ -1425,7 +1424,7 @@ def test_kind_practice():
     assert got == ["practice"] * 3, got
 
 
-# Bug 6 — practice items get no weight and do not count, even beside a "Tests" category
+# Bug 6 / AC90 — synced practice items are dropped and do not count, even beside a "Tests" category
 def test_practice_no_weight():
     with InProcess() as s:
         post_outline_ok(s, "MATH 1ZA3", cats(("Tests", "50%"), ("Assignments", "50%")))
@@ -1433,10 +1432,13 @@ def test_practice_no_weight():
                                 item("p1", title="Practice Test 1", mark=10, out_of=10),
                                 item("a1", title="Assignment 1", mark=6, out_of=10)])
         a = by_sid(get_items(s), "avenue")
-        assert a["p1"]["kind"] == "practice" and a["p1"]["weight"] is None, a["p1"]
+        assert "p1" not in a, a["p1"]
         assert near(a["t1"]["weight"], 50), a["t1"]
         c = get_courses(s)["MATH 1ZA3"]
         assert near(c["grade"], 70) and near(c["graded_pct"], 100), c  # (50*.8 + 50*.6) / 100
+        # a stored item retitled to practice is removed on that sync
+        ingest_ok(s, "avenue", [item("a1", title="Practice Assignment 1")])
+        assert "a1" not in by_sid(get_items(s), "avenue")
 
 
 # Bug 7 — ingest course_info is stored per course and returned as courses[code].info; absent leaves it alone
