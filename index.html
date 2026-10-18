@@ -32,9 +32,11 @@
   .src { color: var(--text-faint); font-size: .85em; }
   .info { color: var(--text-muted); margin: 0 0 .3rem; }
   #cal-nav { display: flex; gap: .3rem; margin: 1rem 0 .4rem; }
-  #calendar { display: grid; grid-template-columns: repeat(var(--n), minmax(8rem, 1fr)); overflow-x: auto; border: 1px solid var(--border); }
-  .day { border-left: 1px solid var(--border); padding: .3rem .4rem; min-height: 5rem; }
-  .day:first-child { border-left: 0; }
+  /* 7 equal columns whatever N is; more days wrap to new rows; every row as tall as the tallest */
+  #calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: 1fr;
+    border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
+  .day { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: .3rem .4rem;
+    min-height: 5rem; overflow-wrap: anywhere; }
   .day h3 { font-size: .9rem; margin: 0 0 .3rem; }
   .day.today h3 { color: var(--primary); }
   .day p { margin: 0 0 .3rem; border-left: 4px solid var(--c); padding-left: .3rem; font-size: .9em; }
@@ -225,7 +227,6 @@ function render() {
   const keep = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue, upcoming }[want];
   const colorOf = (c) => `hsl(${(courses.indexOf(c) * 137) % 360} 55% 38%)`; // AC26: page-derived course color
   const cal = document.getElementById('calendar');
-  cal.style.setProperty('--n', days());
   cal.replaceChildren(...calendar(data.items.filter((i) => (!chosen || (i.course ?? '(no course)') === chosen) && keep(i)), colorOf));
 
   document.getElementById('list').replaceChildren(...courses.filter((c) => !chosen || c === chosen).map((c) => {
