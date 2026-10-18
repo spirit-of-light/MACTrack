@@ -122,6 +122,11 @@ function ssCode(url) {
   return m ? m[1] : null;
 }
 
+// Page links -> unique Simple Syllabus doc codes (MATH 1A03's outline is linked from childsmath).
+function ssDocCodes(hrefs) {
+  return [...new Set(hrefs.map(ssCode).filter(Boolean))];
+}
+
 // componentLaunch HTML -> the toolLaunch path (HTML-escaped &amp; undone), else null.
 function toolLaunchPath(html) {
   const m = /["'](\/d2l\/le\/lti\/[^"']*toolLaunch[^"']*)["']/.exec(html);
@@ -320,6 +325,6 @@ async function fallbackSignedIn(source, state, d) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { dueDate, childsmathLabel, childsmathLoggedOut, childsmathItems, termStart, parseMarks, applyMarks, ssCategories, ssCode, toolLaunchPath,
+  module.exports = { dueDate, childsmathLabel, childsmathLoggedOut, childsmathItems, termStart, parseMarks, applyMarks, ssCategories, ssCode, ssDocCodes, toolLaunchPath,
     avenueItems, crowdmarkItems, syncAll, LoginNeeded, rejectReason, SITES, loggedInUrl, quietHour, crowdmarkEntry, renewAll, fallbackSignedIn };
 }

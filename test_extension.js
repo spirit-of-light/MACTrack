@@ -160,6 +160,17 @@ test('Fix ssCode: doc code from a direct Simple Syllabus doc link (MATH 1B03 out
   assert.ok(!P.ssCode('/d2l/common/dialogs/quickLink/quickLink.d2l?ou=1&type=lti'), 'a relative Avenue link has no doc code');
 });
 
+test('Quick ssDocCodes: Simple Syllabus doc codes from page links (MATH 1A03 outline on childsmath)', () => {
+  assert.deepEqual(P.ssDocCodes([
+    'https://www.childsmath.ca/childsa/forms/1zStuff/student_admin.php',
+    'https://mcmaster.simplesyllabusca.com/en-US/doc/zz99abc/Fall-2026-MATH-1A03',
+    'https://mcmaster.simplesyllabusca.com/en-US/doc/zz99abc/Fall-2026-MATH-1A03#grading',
+    'mailto:someone@mcmaster.ca',
+    'not a url',
+  ]), ['zz99abc']);
+  assert.deepEqual(P.ssDocCodes([]), []);
+});
+
 test('AC54 toolLaunchPath: escaped toolLaunch path found in componentLaunch HTML, &amp; unescaped', () => {
   const html = '<html><script>var x = "/d2l/home"; launch(\'/d2l/le/lti/123/toolLaunch/45/678?resourceCode=MCM-SS-1&amp;ou=123\');</script></html>';
   assert.equal(P.toolLaunchPath(html), '/d2l/le/lti/123/toolLaunch/45/678?resourceCode=MCM-SS-1&ou=123');

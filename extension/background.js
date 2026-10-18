@@ -130,7 +130,7 @@ async function outline(tocTopics, code) {
   } else if (/type=lti/i.test(topic.Url)) {
     await post('/api/outline', { course: code, categories: await syllabusCategories(topic.Url) });
   } else if (ssCode(topic.Url)) {
-    await post('/api/outline', { course: code, categories: await docCategories(ssCode(topic.Url)) });
+    syllabusDocs.push({ course: code, code: ssCode(topic.Url) }); // read after syncAll (readSyllabusDocs)
   } else {
     console.warn(`MacTracker: outline topic for ${code} is an unsupported ${topic.TypeIdentifier}, skipped`);
   }
@@ -202,6 +202,11 @@ async function childsmath() {
       const marks = parseMarks(textLines(await (await get(`${base}/marks.php`)).text()));
       items.push(...applyMarks(childsmathItems(admin, label), marks, label));
       read++;
+      // MATH 1A03's outline is a Simple Syllabus doc linked from the announcements page.
+      await get(`${base}/announce.php`)
+        .then(async (r) => [...doc(await r.text()).querySelectorAll('a[href]')].map((a) => a.href))
+        .then((hrefs) => ssDocCodes(hrefs).forEach((code) => syllabusDocs.push({ course: label, code })))
+        .catch((e) => console.warn(`MacTracker: childsmath ${area} announcements: ${e.message}`));
     } catch (e) {
       if (e instanceof LoginNeeded) throw e;
       console.warn(`MacTracker: skipped childsmath ${area}: ${e.message}`);
@@ -220,10 +225,25 @@ async function sync() {
     return ingest(body);
   });
   for (const r of results) if (r.status === 'rejected') console.error('MacTracker: sync post failed:', r.reason);
+  await readSyllabusDocs();
   if (!needed.length) return;
   await renewalReady;
   await renewAll(needed, renewal, RENEW);
   await saveRenewal();
+}
+
+// Direct Simple Syllabus doc links found during this sync (MATH 1B03 on Avenue, MATH 1A03 on
+// childsmath). Read only after every source has synced, so an earlier course's LTI launch has
+// opened the Simple Syllabus session; each failure is logged and costs nothing else.
+const syllabusDocs = [];
+async function readSyllabusDocs() {
+  for (const d of syllabusDocs.splice(0)) {
+    try {
+      await post('/api/outline', { course: d.course, categories: await docCategories(d.code) });
+    } catch (e) {
+      console.warn(`MacTracker: Simple Syllabus outline for ${d.course}: ${e.message}`);
+    }
+  }
 }
 
 browser.action.onClicked.addListener(() => sync());

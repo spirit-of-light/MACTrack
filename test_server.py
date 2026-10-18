@@ -1204,6 +1204,20 @@ def test_childsmath_get_only():
     assert not called, f"childsmath() calls POST-capable helpers {called}"
 
 
+def test_direct_syllabus_docs_deferred():
+    """Quick: direct Simple Syllabus doc links (MATH 1B03 on Avenue, MATH 1A03 on childsmath's
+    announce.php) are collected while sources sync and read only after syncAll, once an earlier
+    LTI launch has opened the Simple Syllabus session."""
+    bg = ext("background.js")
+    cm = js_function(bg, "childsmath")
+    assert "announce.php" in cm and "ssDocCodes(" in cm, "childsmath() does not look for outline links on announce.php"
+    assert "docCategories(" not in cm, "childsmath() reads a Simple Syllabus doc before the session exists"
+    assert "docCategories(" not in js_function(bg, "outline"), "outline() reads a direct doc before the session exists"
+    s = js_function(bg, "sync")
+    assert "syncAll(" in s and re.search(r"syncAll\(.*?(readSyllabusDocs|docCategories)\(", s, re.S), \
+        "sync() does not read collected Simple Syllabus docs after syncAll"
+
+
 def _safe_body(src, name):
     try:
         return js_function(src, name)
