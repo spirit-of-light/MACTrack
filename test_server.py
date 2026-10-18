@@ -1541,10 +1541,10 @@ def test_lti_replay_checks():
     assert re.search(r"\.ok\b|checked\(|get\(", hop), "an LTI hop response is not checked"
 
 
-# Review MINOR 5 — the page offers the practice kind
+# AC90 (2026-10-18) — practice is not tracked, so the page no longer offers it as a type
 def test_index_kinds_practice():
     m = re.search(r"const KINDS\s*=\s*\[([^\]]*)\]", (ROOT / "index.html").read_text())
-    assert m and "'practice'" in m.group(1), m and m.group(1)
+    assert m and "'practice'" not in m.group(1), m and m.group(1)
 
 
 # Review MINOR 7 — the sync alarm is created once, not on every background start
@@ -1935,15 +1935,20 @@ def test_index_hide_courses():
     assert not any("hiddenCourses" in a for a in fetch_calls(html)), "hidden courses sent to the server"
     assert re.search(r"calendar\(data\.items\.filter\(\(i\) => visible\.includes\(", html), "calendar does not skip hidden courses"
     assert re.search(r"courses = editing\(\) \? all : visible", html), "view mode does not skip hidden courses"
-    assert re.search(r"editing\(\) \? \[eye\]", html), "eye button not limited to edit mode"
+    assert re.search(r"if \(!editing\(\)\) return b;", html), "eye button not limited to edit mode"
     assert re.search(r"all\.indexOf\(c\)", html), "course colours shift when a course is hidden"
 
 
-def test_index_kind_filter_and_rounding():
+def test_index_single_list():
     html = (ROOT / "index.html").read_text()
-    assert re.search(r"<select id=['\"]kind['\"]", html), "no Type filter"
+    for id_ in ("courses", "kinds"):
+        assert re.search(rf"<div id=['\"]{id_}['\"] class=['\"]chips['\"]", html), f"no #{id_} button row"
+    assert re.search(r"\['', \.\.\.values\]\.map", html) and "v || 'All'" in html, "button rows do not start with All"
     assert re.search(r"const keep = \(i\) => byStatus\(i\) && \(!kind \|\| i\.kind === kind\)", html), "Type filter not applied"
-    assert "round2(item.weight), round2(item.mark)" in html, "weight and mark not rounded in view mode"
+    head = re.search(r"\['Done', 'Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',", html)
+    assert head, "list columns are not Done | Type | Course | Title | Due | Time left | Weight | Mark"
+    assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
+    assert "round2(item.weight), markText(item)" in html and "round2(i.mark)" in html, "weight and mark not rounded in view mode"
 
 
 if __name__ == "__main__":

@@ -19,8 +19,13 @@
   p:has(#edit:checked) { background: var(--primary-tint); }
   .banner { background: var(--banner-bg); border: 1px solid var(--banner-border); padding: .4rem .6rem; margin: .3rem 0; }
   #sources { color: var(--text-muted); }
-  section { border-left: 6px solid var(--c); padding-left: .8rem; margin: 1.2rem 0; }
-  h2 { color: var(--c); margin: 0 0 .2rem; font-size: 1.1rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: .4rem 0; }
+  .chips button { background: var(--bg); color: var(--text); border: 1px solid var(--text-faint);
+    border-left: 4px solid var(--c, var(--text-faint)); }
+  .chips button:hover { background: var(--primary-tint); }
+  .chips button[aria-pressed=true] { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+  .chips .off { opacity: .5; }
+  td.course { color: var(--c); font-weight: 600; white-space: nowrap; }
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: .15rem .3rem; border-bottom: 1px solid var(--border); }
   td input { width: 100%; box-sizing: border-box; font: inherit; }
@@ -40,16 +45,16 @@
   .day h3 { font-size: .9rem; margin: 0 0 .3rem; }
   .day.today h3 { color: var(--primary); }
   .day p { margin: 0 0 .3rem; border-left: 4px solid var(--c); padding-left: .3rem; font-size: .9em; }
-  button.eye, button.eye:hover { background: none; color: var(--c); padding: 0 .3rem; vertical-align: middle; }
-  section.off { opacity: .5; }
+  .chips button.eye, .chips button.eye:hover { background: none; color: var(--c); border: 0; padding: 0 .2rem; vertical-align: middle; }
+  tr.off { opacity: .5; }
   .day p.done { text-decoration: line-through; color: var(--text-muted); }
 </style>
 <h1>MacTracker</h1>
 <div id="banners"></div>
 <p id="sources"></p>
+<div id="courses" class="chips" role="group" aria-label="Course"></div>
+<div id="kinds" class="chips" role="group" aria-label="Type"></div>
 <p>
-  <label>Course <select id="course"><option value="">All</option></select></label>
-  <label>Type <select id="kind"><option value="">All</option></select></label>
   <label>Status <select id="status">
     <option value="">All</option><option value="open">Not done</option><option value="done">Done</option>
     <option value="overdue">Overdue</option><option value="upcoming">Upcoming</option>
@@ -75,7 +80,10 @@
   <button id="cal-fwd" aria-label="Next days">→</button>
 </nav>
 <div id="calendar"></div>
-<main id="list"></main>
+<main>
+  <p id="summary" class="info"></p>
+  <table><thead id="head"></thead><tbody id="list"></tbody></table>
+</main>
 <script>
 'use strict';
 // Spec 0002 AC16: copy of extension/parse.js SITES[*].login; Crowdmark signs in through Avenue (session default).
@@ -84,7 +92,7 @@ const LOGIN = {
   crowdmark: 'https://avenue.mcmaster.ca/login.php?target=%2Fd2l%2Fhome',
   childsmath: 'https://login.microsoftonline.com/44376307-b429-42ad-8c25-28cd496f4772/oauth2/v2.0/authorize?client_id=9132e1a8-fef6-4c34-bddb-de7608a2381a&response_type=code&response_mode=query&scope=https%3A%2F%2Fgraph.microsoft.com%2FUser.Read',
 };
-const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'practice', 'other'];
+const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'other']; // practice is not tracked
 const $ = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 const days = () => Number(localStorage.getItem('upcomingDays')) || 7; // AC41/AC42/AC51: browser only
 const round2 = (v) => (v == null ? '' : Math.round(v * 100) / 100); // display only; edit mode keeps the exact value
@@ -106,10 +114,21 @@ const EYE_SHUT = 'M2 10c3 4 6.5 6 10 6s7-2 10-6M5 13l-2 3M12 16v3M19 13l2 3';
 let data = { items: [], courses: {} };
 let status = {};
 let calOffset = 0; // calendar start, in days from today; not saved
+let course = ''; // course and type filters; '' is All; not saved
+let kind = '';
 
 const dueMs = (i) => (i.due ? new Date(i.due).getTime() : Infinity);
 const overdue = (i) => !i.done && dueMs(i) < Date.now();
 const upcoming = (i) => !i.done && dueMs(i) >= Date.now() && dueMs(i) <= Date.now() + days() * 864e5;
+const courseOf = (i) => i.course ?? '(no course)';
+const left = (i) => { // time until due, e.g. "3d 4h" or "5h 20m"; computed at render
+  if (i.done || !i.due) return '';
+  const ms = dueMs(i) - Date.now();
+  const m = Math.floor(Math.abs(ms) / 6e4);
+  const t = m >= 1440 ? `${Math.floor(m / 1440)}d ${Math.floor(m / 60) % 24}h` : `${Math.floor(m / 60)}h ${m % 60}m`;
+  return ms < 0 ? `${t} overdue` : t;
+};
+const markText = (i) => (i.mark == null ? '' : i.out_of == null ? round2(i.mark) : `${round2(i.mark)} / ${round2(i.out_of)}`);
 const localInput = (iso) => { // ISO -> value for <input type=datetime-local>
   if (!iso) return '';
   const d = new Date(iso);
@@ -170,9 +189,11 @@ async function remove(item) {
 
 function row(item) {
   if (!editing()) { // view mode: plain text, no controls
-    const tr = $('tr', {}, ...[item.done ? '✓' : '', (item.title ?? '') + (item.missing ? ' (missing from source)' : ''), item.kind ?? '',
-      item.due ? new Date(item.due).toLocaleString() : '', round2(item.weight), round2(item.mark), item.out_of ?? '',
-      item.progress ?? ''].map((t) => $('td', { textContent: String(t) })));
+    const tr = $('tr', {}, ...[item.done ? '✓' : '', item.kind ?? '', courseOf(item),
+      (item.title ?? '') + (item.missing ? ' (missing from source)' : ''),
+      item.due ? new Date(item.due).toLocaleString() : '', left(item), round2(item.weight), markText(item)]
+      .map((t) => $('td', { textContent: String(t) })));
+    tr.children[2].className = 'course';
     tr.classList.toggle('overdue', overdue(item));
     tr.classList.toggle('upcoming', upcoming(item));
     tr.classList.toggle('missing', !!item.missing);
@@ -188,8 +209,9 @@ function row(item) {
     out_of: $('input', { type: 'number', step: 'any', value: item.out_of ?? '' }),
   };
   const orig = Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, raw(i)]));
-  const tr = $('tr', {}, ...Object.values(inputs).map((i) => $('td', {}, i)),
-    $('td', { textContent: item.progress ?? '' }), // AC59: as-is
+  const tr = $('tr', {}, $('td', {}, inputs.done), $('td', {}, inputs.kind), $('td', { className: 'course', textContent: courseOf(item) }),
+    $('td', {}, inputs.title), $('td', {}, inputs.due), $('td', { textContent: left(item) }), $('td', {}, inputs.weight),
+    $('td', {}, inputs.mark, ' / ', inputs.out_of),
     $('td', { className: 'src', textContent: item.source + (item.missing ? ' · missing from source' : '') }),
     $('td', {}, $('button', { textContent: 'Save', onclick: () => save(item, inputs, orig) }),
       ...(item.source === 'manual' ? [$('button', { textContent: 'Delete', onclick: () => remove(item) })] : [])));
@@ -198,6 +220,13 @@ function row(item) {
   tr.classList.toggle('missing', !!item.missing);
   return tr;
 }
+
+// A row of toggle buttons, All first; the pressed one is the current filter.
+const chips = (values, current, pick) => ['', ...values].map((v) => {
+  const b = $('button', { textContent: v || 'All', onclick: () => { pick(v); render(); } });
+  b.setAttribute('aria-pressed', String(v === current));
+  return b;
+});
 
 // Next days() days from today + calOffset, each with the items due that local day.
 function calendar(items, colorOf) {
@@ -234,59 +263,65 @@ function render() {
   document.getElementById('sources').textContent = Object.entries(status)
     .map(([src, s]) => `${src}: ${s.status}, synced ${new Date(s.synced_at).toLocaleString()}`).join(' · ');
 
-  const all = [...new Set(data.items.map((i) => i.course ?? '(no course)'))].sort();
+  const all = [...new Set(data.items.map(courseOf))].sort();
   const hidden = hiddenCourses();
   const visible = all.filter((c) => !hidden.includes(c));
   const courses = editing() ? all : visible; // edit mode lists hidden courses too, so they can be shown again
+  if (!courses.includes(course)) course = '';
   document.getElementById('known-courses').replaceChildren(
     ...all.filter((c) => c !== '(no course)').map((c) => $('option', { value: c })));
-  const pick = document.getElementById('course');
-  const chosen = pick.value;
-  pick.replaceChildren($('option', { value: '', textContent: 'All' }),
-    ...courses.map((c) => $('option', { value: c, textContent: c, selected: c === chosen })));
-  const want = document.getElementById('status').value;
-  const byStatus = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue, upcoming }[want];
-  const kind = document.getElementById('kind').value;
-  const keep = (i) => byStatus(i) && (!kind || i.kind === kind);
   const colorOf = (c) => `hsl(${(all.indexOf(c) * 137) % 360} 55% 38%)`; // AC26: page-derived course color; hiding keeps colours
-  const picked = (c) => !chosen || c === chosen;
-  const cal = document.getElementById('calendar');
-  cal.replaceChildren(...calendar(data.items.filter((i) => visible.includes(i.course ?? '(no course)') && picked(i.course ?? '(no course)') && keep(i)), colorOf));
 
-  document.getElementById('list').replaceChildren(...courses.filter(picked).map((c) => {
-    const g = data.courses[c] || { grade: null, graded_pct: 0 };
-    const summary = [...(g.grade == null ? [] : [`${g.grade.toFixed(1)}%`]), `${(g.graded_pct || 0).toFixed(0)}% Graded`,
-      ...(g.approximate ? ['approximate'] : [])].join(' | ');
-    const rows = data.items.filter((i) => (i.course ?? '(no course)') === c && keep(i)).sort((a, b) => dueMs(a) - dueMs(b));
-    const head = $('tr', {}, ...['Done', 'Title', 'Kind', 'Due', 'Weight', 'Mark', 'Out of', 'Progress',
-      ...(editing() ? ['Source', ''] : [])]
-      .map((h) => $('th', { textContent: h })));
-    const info = (g.info || []).map((i) => `${i.name}: ${i.value}`).join(' · '); // AC91
+  document.getElementById('courses').replaceChildren(...chips(courses, course, (v) => { course = v; }).map((b, n) => {
+    if (!n) return b;
+    const c = courses[n - 1];
+    b.style.setProperty('--c', colorOf(c));
+    if (!editing()) return b;
     const off = hidden.includes(c);
     const eye = $('button', { className: 'eye', title: off ? `Show ${c}` : `Hide ${c}`,
       onclick: () => setHidden(off ? hidden.filter((h) => h !== c) : [...hidden, c]) });
     eye.setAttribute('aria-label', eye.title);
+    eye.style.setProperty('--c', colorOf(c));
     eye.append(icon(off ? EYE_SHUT : EYE));
-    const s = $('section', { className: off ? 'off' : '' }, $('h2', {}, `${c} | ${summary}`, ...(editing() ? [eye] : [])),
-      ...(info ? [$('p', { className: 'info', textContent: info })] : []),
-      $('table', {}, $('thead', {}, head), $('tbody', {}, ...rows.map(row))));
-    s.style.setProperty('--c', colorOf(c));
-    return s;
+    return $('span', { className: off ? 'off' : '' }, b, eye);
   }));
+  document.getElementById('kinds').replaceChildren(...chips(KINDS, kind, (v) => { kind = v; }));
+
+  const want = document.getElementById('status').value;
+  const byStatus = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue, upcoming }[want];
+  const keep = (i) => byStatus(i) && (!kind || i.kind === kind);
+  const picked = (c) => !course || c === course;
+  const cal = document.getElementById('calendar');
+  cal.replaceChildren(...calendar(data.items.filter((i) => visible.includes(courseOf(i)) && picked(courseOf(i)) && keep(i)), colorOf));
+
+  const g = data.courses[course] || { grade: null, graded_pct: 0 };
+  const summary = document.getElementById('summary');
+  summary.hidden = !course;
+  summary.textContent = [course, ...(g.grade == null ? [] : [`${g.grade.toFixed(1)}%`]), `${(g.graded_pct || 0).toFixed(0)}% Graded`,
+    ...(g.approximate ? ['approximate'] : []), ...(g.info || []).map((i) => `${i.name}: ${i.value}`)].join(' | '); // AC29/AC91
+
+  document.getElementById('head').replaceChildren($('tr', {}, ...['Done', 'Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',
+    ...(editing() ? ['Source', ''] : [])].map((h) => $('th', { textContent: h }))));
+  document.getElementById('list').replaceChildren(...data.items
+    .filter((i) => courses.includes(courseOf(i)) && picked(courseOf(i)) && keep(i))
+    .sort((a, b) => dueMs(a) - dueMs(b))
+    .map((i) => {
+      const tr = row(i);
+      tr.style.setProperty('--c', colorOf(courseOf(i)));
+      tr.classList.toggle('off', hidden.includes(courseOf(i)));
+      return tr;
+    }));
 }
 
 const daysInput = document.getElementById('days');
 daysInput.value = days();
 daysInput.addEventListener('change', () => { localStorage.setItem('upcomingDays', daysInput.value); render(); });
-document.getElementById('course').addEventListener('change', render);
 const editBox = document.getElementById('edit');
 editBox.checked = editing();
 editBox.addEventListener('change', () => { localStorage.setItem('editMode', editBox.checked ? '1' : '0'); render(); });
 document.querySelector('#add [name=kind]').append(...KINDS.map((k) => $('option', { value: k, textContent: k })));
 document.getElementById('add').addEventListener('submit', add);
 document.getElementById('status').addEventListener('change', render);
-document.getElementById('kind').append(...KINDS.map((k) => $('option', { value: k, textContent: k })));
-document.getElementById('kind').addEventListener('change', render);
 document.getElementById('cal-back').addEventListener('click', () => { calOffset -= days(); render(); });
 document.getElementById('cal-fwd').addEventListener('click', () => { calOffset += days(); render(); });
 document.getElementById('cal-today').addEventListener('click', () => { calOffset = 0; render(); });
