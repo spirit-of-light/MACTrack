@@ -136,7 +136,7 @@ async function remove(item) {
 function row(item) {
   if (!editing()) { // view mode: plain text, no controls
     const tr = $('tr', {}, ...[item.done ? '✓' : '', item.title ?? '', item.kind ?? '',
-      item.due ? new Date(item.due).toLocaleString() : '', item.weight ?? '', item.mark ?? '', item.out_of ?? '',
+      item.due ? new Date(item.due).toLocaleString() : '', item.weight == null ? '' : Math.round(item.weight * 100) / 100, item.mark ?? '', item.out_of ?? '',
       item.progress ?? ''].map((t) => $('td', { textContent: String(t) })),
       $('td', { className: 'src', textContent: item.source + (item.missing ? ' · missing from source' : '') }));
     tr.classList.toggle('overdue', overdue(item));
@@ -190,14 +190,14 @@ function render() {
   document.getElementById('list').replaceChildren(...courses.filter((c) => !chosen || c === chosen).map((c) => {
     const color = `hsl(${(courses.indexOf(c) * 137) % 360} 55% 38%)`; // AC26: page-derived course color
     const g = data.courses[c] || { grade: null, graded_pct: 0 };
-    const summary = `${g.grade == null ? '—' : `${g.grade.toFixed(1)}%`} · ${(g.graded_pct || 0).toFixed(0)}% graded`
-      + (g.approximate ? ' · approximate' : '');
+    const summary = [...(g.grade == null ? [] : [`${g.grade.toFixed(1)}%`]), `${(g.graded_pct || 0).toFixed(0)}% Graded`,
+      ...(g.approximate ? ['approximate'] : [])].join(' | ');
     const rows = data.items.filter((i) => (i.course ?? '(no course)') === c && keep(i)).sort((a, b) => dueMs(a) - dueMs(b));
     const head = $('tr', {}, ...['Done', 'Title', 'Kind', 'Due', 'Weight', 'Mark', 'Out of', 'Progress', 'Source',
       ...(editing() ? [''] : [])]
       .map((h) => $('th', { textContent: h })));
     const info = (g.info || []).map((i) => `${i.name}: ${i.value}`).join(' · '); // AC91
-    const s = $('section', {}, $('h2', { textContent: `${c} — ${summary}` }),
+    const s = $('section', {}, $('h2', { textContent: `${c} | ${summary}` }),
       ...(info ? [$('p', { className: 'info', textContent: info })] : []),
       $('table', {}, $('thead', {}, head), $('tbody', {}, ...rows.map(row))));
     s.style.setProperty('--c', color);
