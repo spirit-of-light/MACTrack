@@ -1601,6 +1601,8 @@ def test_avenue_records_crowdmark_entry():
     sets = [call_args(bg, m.end() - 1) for m in re.finditer(r"storage\.session\.set\s*\(", bg)]
     keys = [k for a in sets for k in (_object_keys(a) or [])]
     assert any("crowdmark" in k.lower() for k in keys), f"no Crowdmark entry URL key in storage.session.set: {keys}"
+    # AC24: the stored Crowdmark URL is re-checked before a renewal tab opens
+    assert "avenueLtiUrl(" in js_function(bg, "entry"), "entry() does not re-check the stored Crowdmark URL"
 
 
 # Spec 0002 AC18 — nothing is injected into any page
