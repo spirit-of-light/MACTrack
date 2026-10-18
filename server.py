@@ -315,6 +315,13 @@ def course_view(db):
             total = sum(scheme.values())
             if graded and (best[0] is None or score / graded * 100 > best[0]):  # AC56: higher scheme
                 best = (score / graded * 100, graded / total * 100 if total else 0)
+        if not w.get("schemes"):  # no outline: grade from the item weights (synced or entered by hand)
+            weighted = [it for it in its if it["weight"] and it["kind"] != "practice"]
+            done = [it for it in weighted if it["mark"] is not None and it["out_of"]]
+            graded, total = sum(it["weight"] for it in done), sum(it["weight"] for it in weighted)
+            if graded:
+                best = (sum(it["weight"] * it["mark"] / it["out_of"] for it in done) / graded * 100,
+                        graded / total * 100)
         courses[code] = {"grade": best[0], "graded_pct": best[1], "approximate": bool(w.get("approximate")),
                          "info": w.get("info", [])}
     for it in items:
@@ -335,8 +342,20 @@ def parse_pct(s):
 
 
 def outline_categories(text):
-    """Outline text -> [{name, weights: [pct string]}] for every `<Name> ... NN%` line."""
-    return [{"name": m[1].strip(), "weights": [m[2]]} for m in OUTLINE_LINE.finditer(text)]
+    """Outline text -> [{name, weights: [pct string]}] for every `<Name> ... NN%` line, and for every
+    table row `<Name>\\t...\\t<pct>\\t<description>` (DOCX rows, COMPSCI 1MD3) whose first percent-only
+    cell after the name is its weight."""
+    out = []
+    for line in text.splitlines():
+        m = OUTLINE_LINE.match(line)
+        if m:
+            out.append({"name": m[1].strip(), "weights": [m[2]]})
+            continue
+        cells = [c.strip() for c in line.split("\t")]
+        pct = next((c for c in cells[1:] if re.fullmatch(rf"{PCT}\**", c)), None)
+        if cells[0] and pct:
+            out.append({"name": cells[0], "weights": [pct.rstrip("*")]})
+    return out
 
 
 def parse_outline_text(text):

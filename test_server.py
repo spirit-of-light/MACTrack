@@ -1061,6 +1061,33 @@ def test_grade_nothing_graded():
 
 
 
+# Quick — a table row "<Name>\t<pct>\t<description>" (COMPSCI 1MD3's DOCX) gives its name and weight
+def test_outline_tab_rows():
+    import server
+
+    text = ("Assignment 0 (week 2)\t1%\tJust to make sure you understand auto-grading\n"
+            "Midterm (Nov. 3rd)\t25%\tHeld during the evening. The lecture on Oct 30th will be a review.\n"
+            "Exam (Exam week)\t45%\tCumulative.\n"
+            "Weekly readings\tsee Avenue\tnot graded")
+    got = server.parse_outline_text(text)
+    assert got == {"Assignment 0 (week 2)": 1, "Midterm (Nov. 3rd)": 25, "Exam (Exam week)": 45}, got
+
+
+# Quick — a course with no outline is graded from its item weights (MATH 1A03, weights entered by hand)
+def test_grade_manual_weights():
+    with InProcess() as s:
+        ingest_ok(s, "childsmath", [item("m1", course="Math 1A03 F26", title="Assignment #1", mark=8, out_of=10),
+                                    item("m2", course="Math 1A03 F26", title="Assignment #2"),
+                                    item("m3", course="Math 1A03 F26", title="Test #1", mark=30, out_of=40)])
+        ids = {i["source_id"]: i["id"] for i in get_items(s)}
+        override_ok(s, ids["m1"], {"weight": 10})
+        override_ok(s, ids["m2"], {"weight": 10})
+        override_ok(s, ids["m3"], {"weight": 30})
+        c = get_courses(s)["MATH 1A03"]
+        # graded: 10 * 0.8 + 30 * 0.75 = 30.5 of 40 -> 76.25%; 40 of 50 weight graded -> 80%
+        assert near(c["grade"], 76.25) and near(c["graded_pct"], 80), c
+
+
 # Session default — a placeholder gives way to a real item of the same `other` category
 def test_placeholder_gives_way():
     with InProcess() as s:
