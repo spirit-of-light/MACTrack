@@ -1803,9 +1803,9 @@ def test_manual_add():
             "manual", "MATH 1ZA3", "Quiz 3", "quiz", due, 5, 4, 5), r
         assert re.fullmatch(r"[0-9a-f]{32}", r["source_id"]) and r["source_id"] != r2["source_id"], (r, r2)
         o = overrides_of(r)
-        assert set(o) == {"title", "due", "weight", "mark", "out_of"}, o
+        assert set(o) == {"due", "weight", "mark", "out_of"}, o  # title and kind are plain columns
         assert o["mark"]["value"] == 4 and datetime.fromisoformat(o["mark"]["at"]), o
-        assert r2["kind"] == "assignment" and overrides_of(r2)["kind"]["value"] == "assignment", r2
+        assert r2["kind"] == "assignment" and set(overrides_of(r2)) == set(), r2
         assert not r["missing"], r
 
 
@@ -1861,14 +1861,16 @@ def test_manual_delete():
 def test_manual_merges():
     with InProcess() as s:
         ingest_ok(s, "avenue", [AV])
-        add_ok(s, {"course": "MATH 1ZA3", "title": "Assignment 2", "mark": 9, "out_of": 10, "weight": 3})
+        due = "2026-10-21T00:00:00.000Z"
+        add_ok(s, {"course": "MATH 1ZA3", "title": "Assignment 2", "kind": "quiz", "due": due,
+                   "mark": 9, "out_of": 10, "weight": 3})
         ingest_ok(s, "avenue", [dict(AV, mark=5, out_of=20)])
         rows = in_course(get_items(s), "MATH 1ZA3")
         assert len(rows) == 1, rows
         r = rows[0]
-        assert (r["source"], r["source_id"], r["title"], r["mark"], r["out_of"]) == (
-            "avenue", "dropbox:1", "Assignment 2", 9, 10), r  # the manual title is an override too (AC105)
-        assert set(overrides_of(r)) >= {"title", "mark", "out_of", "weight"}, overrides_of(r)
+        assert (r["source"], r["source_id"], r["title"], r["kind"]) == ("avenue", "dropbox:1", AV["title"], "assignment"), r
+        assert (r["due"], r["weight"], r["mark"], r["out_of"]) == (due, 3, 9, 10), r
+        assert set(overrides_of(r)) == {"due", "weight", "mark", "out_of"}, overrides_of(r)
 
 
 # AC110 — syncs never flag or modify manual items; an ingest cannot claim the `manual` source

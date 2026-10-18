@@ -200,7 +200,8 @@ MANUAL_FIELDS = ("course", "title", "kind", "due", "weight", "mark", "out_of")
 
 
 def create_item(db, body):
-    """AC105: store a page-added item (source `manual`); given fields become user overrides. Returns its id."""
+    """AC105: store a page-added item (source `manual`); given due/weight/mark/out_of become user overrides,
+    title and kind are plain columns, so a synced row's own title/kind show after a merge. Returns its id."""
     if not isinstance(body, dict) or not all(k in MANUAL_FIELDS for k in body):
         raise ValueError(f"body must be an object with only {', '.join(MANUAL_FIELDS)}")
     check_fields(body)
@@ -218,7 +219,7 @@ def create_item(db, body):
                 "VALUES (?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?)",
                 (course_key(body["course"]), uuid.uuid4().hex, row["title"], row["kind"], row["due"],
                  row["weight"], row["mark"], row["out_of"],
-                 json.dumps({k: {"value": v, "at": at} for k, v in given.items()})),
+                 json.dumps({k: {"value": v, "at": at} for k, v in given.items() if k not in ("title", "kind")})),
             )
         return cur.lastrowid
     finally:
