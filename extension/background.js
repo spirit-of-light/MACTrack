@@ -94,6 +94,12 @@ async function syllabusCategories(topicUrl) {
   }
   const code = ssCode(r.url);
   if (!code) throw new Error('Simple Syllabus launch did not reach a doc');
+  return docCategories(code);
+}
+
+// A Simple Syllabus doc's grading tables. A direct doc link (MATH 1B03) reuses the session an
+// earlier course's LTI launch opened; without one, api2 answers HTML and json() throws.
+async function docCategories(code) {
   const data = await json(`${SYLLABUS}/api2/doc-full-page-get?code=${encodeURIComponent(code)}`);
   const rows = [];
   for (const c of data.items[0].doc_data.components) {
@@ -123,6 +129,10 @@ async function outline(tocTopics, code) {
     await post(`/api/outline?course=${encodeURIComponent(code)}`, await r.arrayBuffer(), ctype);
   } else if (/type=lti/i.test(topic.Url)) {
     await post('/api/outline', { course: code, categories: await syllabusCategories(topic.Url) });
+  } else if (ssCode(topic.Url)) {
+    await post('/api/outline', { course: code, categories: await docCategories(ssCode(topic.Url)) });
+  } else {
+    console.warn(`MacTracker: outline topic for ${code} is an unsupported ${topic.TypeIdentifier}, skipped`);
   }
 }
 

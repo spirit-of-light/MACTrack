@@ -153,6 +153,13 @@ test('AC54 ssCode: doc code from the sso-redirect URL, "/doc/" stripped', () => 
   assert.ok(!P.ssCode('https://mcmaster.simplesyllabusca.com/ui/lti-login'), 'code from a URL without doc_url');
 });
 
+test('Fix ssCode: doc code from a direct Simple Syllabus doc link (MATH 1B03 outline)', () => {
+  assert.equal(P.ssCode('https://mcmaster.simplesyllabusca.com/en-US/doc/l42gfm2l4/Fall-2026-MATH-1B03-C02-CLEMENE-Linear-Algebra-I'), 'l42gfm2l4');
+  assert.equal(P.ssCode('https://mcmaster.simplesyllabusca.com/doc/abc123'), 'abc123');
+  assert.ok(!P.ssCode('https://example.com/en-US/doc/l42gfm2l4/x'), 'doc path on another host is not a Simple Syllabus doc');
+  assert.ok(!P.ssCode('/d2l/common/dialogs/quickLink/quickLink.d2l?ou=1&type=lti'), 'a relative Avenue link has no doc code');
+});
+
 test('AC54 toolLaunchPath: escaped toolLaunch path found in componentLaunch HTML, &amp; unescaped', () => {
   const html = '<html><script>var x = "/d2l/home"; launch(\'/d2l/le/lti/123/toolLaunch/45/678?resourceCode=MCM-SS-1&amp;ou=123\');</script></html>';
   assert.equal(P.toolLaunchPath(html), '/d2l/le/lti/123/toolLaunch/45/678?resourceCode=MCM-SS-1&ou=123');

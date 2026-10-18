@@ -113,8 +113,13 @@ function ssCategories(rows) {
 
 // Final sso-redirect URL -> doc code ("/doc/" stripped), else null.
 function ssCode(url) {
-  const doc = new URL(url).searchParams.get('doc_url');
-  return doc ? doc.replace(/^\/doc\//, '') : null;
+  let u;
+  try { u = new URL(url); } catch { return null; }
+  const doc = u.searchParams.get('doc_url');
+  if (doc) return doc.replace(/^\/doc\//, '');
+  // A direct doc link, as MATH 1B03's outline topic: /<locale>/doc/<code>/<slug>.
+  const m = u.hostname === 'mcmaster.simplesyllabusca.com' && /^\/(?:[\w-]+\/)?doc\/(\w+)/.exec(u.pathname);
+  return m ? m[1] : null;
 }
 
 // componentLaunch HTML -> the toolLaunch path (HTML-escaped &amp; undone), else null.
