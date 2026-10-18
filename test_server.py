@@ -1771,6 +1771,134 @@ def test_rejected_sync_surfaces():
             f"{name}() posts ingest without the rejected-sync handling"
 
 
+
+# ---- Manual items (AC105-AC110, developer-requested) ------------------------------
+
+def page_post(s, path, body, ctype="application/json", headers=None):
+    """What the page does: no X-Token. body is JSON-encoded unless it is already bytes."""
+    data = body if isinstance(body, bytes) else json.dumps(body).encode()
+    req = urllib.request.Request(s.url + path, data, {"Content-Type": ctype, **(headers or {})}, method="POST")
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.loads(r.read() or b"null"), r.headers
+    except urllib.error.HTTPError as e:
+        return e.code, None, e.headers
+
+
+def add_ok(s, body):
+    code, out, _ = page_post(s, "/api/items", body)
+    assert code == 201, f"POST /api/items -> {code}"
+    return out["id"]
+
+
+# AC105 — POST /api/items creates a manual item; given fields are user overrides, kind derived from the title
+def test_manual_add():
+    with InProcess() as s:
+        due = "2026-10-20T23:59:00.000Z"
+        rid = add_ok(s, {"course": "math 1za3 fall", "title": "Quiz 3", "due": due, "weight": 5, "mark": 4, "out_of": 5})
+        rid2 = add_ok(s, {"course": "MATH 1ZA3", "title": "Lab report", "kind": "assignment"})
+        items = {i["id"]: i for i in get_items(s)}
+        r, r2 = items[rid], items[rid2]
+        assert (r["source"], r["course"], r["title"], r["kind"], r["due"], r["weight"], r["mark"], r["out_of"]) == (
+            "manual", "MATH 1ZA3", "Quiz 3", "quiz", due, 5, 4, 5), r
+        assert re.fullmatch(r"[0-9a-f]{32}", r["source_id"]) and r["source_id"] != r2["source_id"], (r, r2)
+        o = overrides_of(r)
+        assert set(o) == {"title", "due", "weight", "mark", "out_of"}, o
+        assert o["mark"]["value"] == 4 and datetime.fromisoformat(o["mark"]["at"]), o
+        assert r2["kind"] == "assignment" and overrides_of(r2)["kind"]["value"] == "assignment", r2
+        assert not r["missing"], r
+
+
+# AC106 — bad bodies are refused and write nothing
+def test_manual_add_rejects():
+    with InProcess() as s:
+        add_ok(s, {"course": "MATH 1ZA3", "title": "Quiz 1"})  # control
+        before = db_dump(s)
+        for bad in ({"title": "Quiz 2"}, {"course": "MATH 1ZA3"}, {"course": "", "title": "Quiz 2"},
+                    {"course": "MATH 1ZA3", "title": "  "}, {"course": "MATH 1ZA3", "title": "Quiz 2", "mark": "5"},
+                    {"course": "MATH 1ZA3", "title": 7}, {"course": "MATH 1ZA3", "title": "Quiz 2", "source": "avenue"},
+                    ["MATH 1ZA3", "Quiz 2"]):
+            code, _, _ = page_post(s, "/api/items", bad)
+            assert code == 400, (bad, code)
+        code, _, _ = page_post(s, "/api/items", {"course": "MATH 1ZA3", "title": "Quiz 2"}, ctype="text/plain")
+        assert code == 415, code
+        assert page_post(s, "/api/items", b"{not json")[0] == 400
+        assert db_dump(s) == before, "DB changed on a bad add"
+
+
+# AC107 — same guard as overrides: no CORS preflight or Access-Control-* headers, Host allowlist
+def test_manual_routes_guard():
+    with InProcess() as s:
+        rid = add_ok(s, {"course": "MATH 1ZA3", "title": "Quiz 1"})
+        for path in ("/api/items", f"/api/items/{rid}/delete"):
+            code, h = raw_request(s, "OPTIONS", path, {"Origin": EXT_ORIGIN, **PREFLIGHT})
+            assert code >= 400 and not acao_headers(h), (path, code, dict(h))
+        code, _, h = page_post(s, "/api/items", {"course": "MATH 1ZA3", "title": "Quiz 2"}, headers={"Origin": EXT_ORIGIN})
+        assert code == 201 and not acao_headers(h), (code, dict(h))
+        before = db_dump(s)
+        for path in ("/api/items", f"/api/items/{rid}/delete"):
+            code, _, _ = page_post(s, path, {"course": "MATH 1ZA3", "title": "Quiz 3"}, headers={"Host": "evil.example"})
+            assert code == 403, (path, code)
+        assert db_dump(s) == before
+
+
+# AC108 — only manual items can be deleted
+def test_manual_delete():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [item("1")])
+        av = get_items(s)[0]["id"]
+        rid = add_ok(s, {"course": "CHEM 1A03", "title": "Quiz 1"})
+        before = db_dump(s)
+        assert page_post(s, f"/api/items/{rid}/delete", {}, ctype="text/plain")[0] == 415
+        assert page_post(s, f"/api/items/{av}/delete", {})[0] == 400
+        assert page_post(s, "/api/items/999/delete", {})[0] == 404
+        assert db_dump(s) == before, "DB changed on a refused delete"
+        assert page_post(s, f"/api/items/{rid}/delete", {})[0] == 200
+        assert [i["id"] for i in get_items(s)] == [av]
+
+
+# AC109 — a manual item merges into a synced item (synced row kept); its overrides win, also after a re-sync
+def test_manual_merges():
+    with InProcess() as s:
+        ingest_ok(s, "avenue", [AV])
+        add_ok(s, {"course": "MATH 1ZA3", "title": "Assignment 2", "mark": 9, "out_of": 10, "weight": 3})
+        ingest_ok(s, "avenue", [dict(AV, mark=5, out_of=20)])
+        rows = in_course(get_items(s), "MATH 1ZA3")
+        assert len(rows) == 1, rows
+        r = rows[0]
+        assert (r["source"], r["source_id"], r["title"], r["mark"], r["out_of"]) == (
+            "avenue", "dropbox:1", "Assignment 2", 9, 10), r  # the manual title is an override too (AC105)
+        assert set(overrides_of(r)) >= {"title", "mark", "out_of", "weight"}, overrides_of(r)
+
+
+# AC110 — syncs never flag or modify manual items; an ingest cannot claim the `manual` source
+def test_manual_untouched_by_sync():
+    with InProcess() as s:
+        rid = add_ok(s, {"course": "MATH 1ZA3", "title": "Quiz 9", "mark": 1, "out_of": 2})
+        ingest_ok(s, "avenue", [item("1")])
+        ingest_ok(s, "avenue", [])
+        before = db_dump(s)
+        sid = {i["id"]: i for i in get_items(s)}[rid]["source_id"]
+        assert ingest(s, "manual", [{"source_id": sid, "title": "x", "mark": 0}]) == 400
+        assert ingest(s, "manual", [], status="ok") == 400
+        assert db_dump(s) == before
+        r = {i["id"]: i for i in get_items(s)}[rid]
+        assert not r["missing"] and (r["title"], r["mark"]) == ("Quiz 9", 1), r
+
+
+# AC111 — the page has an add form and a delete button for manual rows only, both JSON POSTs
+def test_index_manual_items():
+    html = (ROOT / "index.html").read_text()
+    calls = fetch_calls(html)
+    adds = [a for a in calls if re.match(r"\(\s*['\"`]/api/items['\"`]\s*,", a)]
+    assert adds, "no add POST to /api/items"
+    dels = [a for a in calls if re.match(r"\(\s*`/api/items/\$\{item\.id\}/delete`", a)]
+    assert dels, "no delete POST to /api/items/<id>/delete"
+    for a in adds + dels:
+        assert re.search(r"method\s*:\s*['\"]POST['\"]", a) and "application/json" in a, a[:160]
+    assert re.search(r"source\s*===\s*['\"]manual['\"]", html), "delete not limited to manual rows"
+    assert "Add item" in html and "datetime-local" in html and "innerHTML" not in html
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:

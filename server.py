@@ -8,6 +8,7 @@ import re
 import secrets
 import socketserver
 import sqlite3
+import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -118,6 +119,8 @@ def ingest(db, body):
     source, items, status = body.get("source"), body.get("items"), body.get("status")
     if not isinstance(source, str) or status not in STATUSES or not isinstance(items, list):
         raise ValueError("need source, status, items[]")
+    if source == "manual":  # AC110: only the page creates manual items; syncs never touch them
+        raise ValueError("source 'manual' is reserved for items added on the page")
     if not all(isinstance(i, dict) and isinstance(i.get("source_id"), (str, int)) for i in items):
         raise ValueError("each item needs a source_id")
     for i in items:
@@ -193,6 +196,51 @@ def set_override(db, item_id, fields):
         c.close()
 
 
+MANUAL_FIELDS = ("course", "title", "kind", "due", "weight", "mark", "out_of")
+
+
+def create_item(db, body):
+    """AC105: store a page-added item (source `manual`); given fields become user overrides. Returns its id."""
+    if not isinstance(body, dict) or not all(k in MANUAL_FIELDS for k in body):
+        raise ValueError(f"body must be an object with only {', '.join(MANUAL_FIELDS)}")
+    check_fields(body)
+    if not all(isinstance(body.get(k), str) and body[k].strip() for k in ("course", "title")):
+        raise ValueError("need course and title")
+    at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+    given = {k: v for k, v in body.items() if k != "course" and v is not None}
+    row = {"title": body["title"], "kind": kind(body["title"]), "due": None, "weight": None, "mark": None,
+           "out_of": None, **given}
+    c = connect(db)
+    try:
+        with c:
+            cur = c.execute(
+                "INSERT INTO items (course, source, source_id, title, kind, due, weight, mark, out_of, overridden) "
+                "VALUES (?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?)",
+                (course_key(body["course"]), uuid.uuid4().hex, row["title"], row["kind"], row["due"],
+                 row["weight"], row["mark"], row["out_of"],
+                 json.dumps({k: {"value": v, "at": at} for k, v in given.items()})),
+            )
+        return cur.lastrowid
+    finally:
+        c.close()
+
+
+def delete_item(db, item_id):
+    """AC108: delete a manual item. False if it does not exist; ValueError for a synced item."""
+    c = connect(db)
+    try:
+        with c:
+            row = c.execute("SELECT source FROM items WHERE id = ?", (item_id,)).fetchone()
+            if row is None:
+                return False
+            if row["source"] != "manual":
+                raise ValueError("only items added on the page can be deleted")
+            c.execute("DELETE FROM items WHERE id = ?", (item_id,))
+        return True
+    finally:
+        c.close()
+
+
 def parse_due(s):
     """ISO time to an aware datetime (naive = local time), or None."""
     try:
@@ -221,9 +269,9 @@ def apply_overrides(row):
 def merged_items(db):
     """Raw rows with overrides applied, deduped across sources (AC7/8/9/37/38/48)."""
     out = []
-    # AC88: the kept row is the first by source priority avenue > crowdmark > childsmath.
+    # AC88/AC109: the kept row is the first by source priority avenue > crowdmark > childsmath > manual.
     raw = rows(db, "SELECT * FROM items ORDER BY CASE source WHEN 'avenue' THEN 0 WHEN 'crowdmark' THEN 1 "
-                   "WHEN 'childsmath' THEN 2 ELSE 3 END, id")
+                   "WHEN 'childsmath' THEN 2 WHEN 'manual' THEN 4 ELSE 3 END, id")
     for r in raw:
         r["overridden"] = json.loads(r["overridden"] or "{}")
         apply_overrides(r)
@@ -579,9 +627,9 @@ class Handler(BaseHTTPRequestHandler):
         if data is None:
             return
         url = urlsplit(self.path)
-        m = re.fullmatch(r"/api/items/(\d+)", url.path)
+        m = re.fullmatch(r"/api/items(?:/(\d+)(/delete)?)?", url.path)
         if m:
-            return self.post_override(int(m[1]), data)
+            return self.post_page(m[1] and int(m[1]), bool(m[2]), data)
         if url.path not in ("/api/ingest", "/api/outline"):
             return self.send_error(404)
         if not self.token_ok():  # AC4: 401 before any write
@@ -608,16 +656,22 @@ class Handler(BaseHTTPRequestHandler):
         self.json(200, {"ok": True})
 
 
-    def post_override(self, item_id, data):
-        # No token: the page has none. CSRF guard = JSON content type (forces a CORS preflight,
-        # which do_OPTIONS refuses for this route: no Access-Control-* headers) + Host allowlist.
+    def post_page(self, item_id, delete, data):
+        """The page's routes: add (`/api/items`), override (`/<id>`), delete (`/<id>/delete`).
+        No token: the page has none. CSRF guard = JSON content type (forces a CORS preflight,
+        which do_OPTIONS refuses for these routes: no Access-Control-* headers) + Host allowlist."""
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             return self.send_error(415, "Content-Type must be application/json")
         try:
-            fields = json.loads(data)
-            if not isinstance(fields, dict):
-                raise ValueError("body must be an object")
-            found = set_override(self.server.db, item_id, fields)
+            if delete:
+                found = delete_item(self.server.db, item_id)
+            else:
+                fields = json.loads(data)
+                if item_id is None:
+                    return self.json(201, {"id": create_item(self.server.db, fields)})
+                if not isinstance(fields, dict):
+                    raise ValueError("body must be an object")
+                found = set_override(self.server.db, item_id, fields)
         except ValueError as e:
             return self.send_error(400, "Bad Request", str(e))  # detail goes in the body, so non-ASCII is safe
         if not found:
