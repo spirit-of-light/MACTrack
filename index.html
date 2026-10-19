@@ -488,6 +488,7 @@ function render() {
     .sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b)) // not done first, then by due date
     .map((i) => {
       const tr = row(i);
+      tr.item = i; // for tick()
       tr.style.setProperty('--c', colorOf(courseOf(i)));
       tr.classList.toggle('off', hidden.includes(courseOf(i)));
       if (i.due) { // local due date: calendar hover finds these rows, row hover finds its calendar day
@@ -512,6 +513,8 @@ function render() {
     tr.style.setProperty('--c', colorOf(c));
     return tr;
   }));
+  timed = [...document.querySelectorAll('#list tr')].map((tr) => [tr, tr.item]).filter(([, i]) => i && i.due && !i.done);
+  tick();
   // Line the dots up: size every date slot to the widest date shown, measured with the slot unset
   const table = document.getElementById('items');
   table.style.removeProperty('--date-w');
@@ -519,6 +522,26 @@ function render() {
   if (widths.length) table.style.setProperty('--date-w', `${Math.ceil(Math.max(...widths))}px`);
   pin();
 }
+
+// Time left changes at whole hours of time remaining (whole minutes under a day). Refresh only those cells, and the
+// row's overdue/upcoming colour, exactly when the next one changes; nothing runs in between.
+let timed = []; // [row, item] for open items with a due date
+let tickTimer;
+function tick() {
+  clearTimeout(tickTimer);
+  const now = Date.now();
+  let wait = Infinity;
+  for (const [tr, i] of timed) {
+    tr.children[5].textContent = left(i);
+    tr.classList.toggle('overdue', overdue(i));
+    tr.classList.toggle('upcoming', upcoming(i));
+    const rest = dueMs(i) - now;
+    const unit = Math.abs(rest) >= 864e5 ? 36e5 : 6e4;
+    wait = Math.min(wait, rest > 0 ? rest % unit || unit : unit - (-rest % unit));
+  }
+  if (wait < Infinity) tickTimer = setTimeout(tick, wait + 50);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); }); // timers sleep in background tabs
 
 // The calendar stays in view only for N <= 14 (two rows); the column titles stick just below it, or to the top.
 function pin() {
@@ -541,9 +564,9 @@ document.getElementById('add').addEventListener('submit', add);
 document.getElementById('cal-back').addEventListener('click', () => { calOffset -= days(); render(); });
 document.getElementById('cal-fwd').addEventListener('click', () => { calOffset += days(); render(); });
 document.getElementById('cal-today').addEventListener('click', () => { calOffset = 0; render(); });
-const tick = document.body.appendChild($('span', { textContent: '✓' })); // size the Done column to the glyph
-document.documentElement.style.setProperty('--tick', `${Math.ceil(tick.getBoundingClientRect().width) + 4}px`);
-tick.remove();
+const glyph = document.body.appendChild($('span', { textContent: '✓' })); // size the Done column to the glyph
+document.documentElement.style.setProperty('--tick', `${Math.ceil(glyph.getBoundingClientRect().width) + 4}px`);
+glyph.remove();
 load();
 </script>
 </html>

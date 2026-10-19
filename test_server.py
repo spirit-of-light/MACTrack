@@ -2034,6 +2034,27 @@ def test_index_grades_links_empty_unload_filters():
     assert not any("filters" in a for a in fetch_calls(html)), "filters sent to the server"
 
 
+def test_index_time_left_refresh():
+    html = (ROOT / "index.html").read_text()
+    body = re.search(r"^function tick\(\) \{.*?^\}$", html, re.M | re.S)[0]
+    assert "tr.children[5].textContent = left(i)" in body and "setTimeout(tick," in body, "time left cells are not refreshed"
+    assert "render()" not in body and "setInterval" not in html, "refresh rebuilds the page or polls"
+    # the wait is the time until the next displayed change: hour steps over a day, minute steps under it
+    js = """
+const dueMs = (i) => i.due; let timed, tickTimer; const overdue = () => false, upcoming = () => false, left = () => '';
+let waited; const setTimeout = (f, ms) => { waited = ms - 50; }; const clearTimeout = () => {};
+const Date = { now: () => 0 };
+const row = () => ({ children: Array(6).fill(0).map(() => ({})), classList: { toggle() {} } });
+""" + body + """
+const out = [];
+for (const due of [2 * 864e5 + 36e5 * 4 + 6e4 * 30, 36e5 * 3 + 6e4 * 20 + 1e3 * 15, -(36e5 + 6e4 * 10)]) {
+  timed = [[row(), { due }]]; tick(); out.push(waited);
+}
+console.log(JSON.stringify(out));"""
+    got = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
+    assert got == [6e4 * 30, 1e3 * 15, 6e4], got
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:
