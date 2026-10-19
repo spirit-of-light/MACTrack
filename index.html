@@ -9,6 +9,7 @@
     --bg: #FFFFFF; --surface: #FAFAFA; --text: #222222; --text-muted: #666666; --text-faint: #888888; --border: #EEEEEE;
     --overdue-bg: #FBD5D5; --upcoming-bg: #FFF3C4; --banner-bg: #FDE2E1; --banner-border: #E0A3A0;
   }
+  html { overscroll-behavior: none; } /* no rubber-band bounce past the top or bottom (macOS) */
   body { font: 14px system-ui, sans-serif; margin: 1.5rem; color: var(--text); background: var(--bg); }
   a { color: var(--primary); }
   :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
