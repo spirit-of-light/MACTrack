@@ -1950,6 +1950,7 @@ def test_index_single_list():
     assert head, "list columns are not Done | Type | Course | Title | Due | Time left | Weight | Mark"
     assert "upcoming }" not in html and "Upcoming'" not in html, "Upcoming still offered as a status"
     assert html.index('id="calendar"') < html.index('id="courses"'), "calendar is not above the filters"
+    assert re.search(r'<div id="layout">\s*<main>.*?</main>\s*<aside id="filters">', html, re.S), "filters are not a sidebar right of the list"
     assert re.search(r'<nav id="cal-nav">(?:(?!</nav>).)*id="days"', html, re.S), "upcoming window not beside the calendar arrows"
     assert ".sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b))" in html, "done items not listed after open ones"
     assert re.search(r"<th>Website</th><th>Status</th><th>Last synced</th>", html), "no sync status table"
@@ -1973,7 +1974,7 @@ const out = [dueText(null, now), dueText(new Date(2026, 9, 20, 9, 5).toISOString
 console.log(JSON.stringify(out));"""
     got = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
     assert got == [[], ["20 Oct", "09:05"], ["03 Jan 2027", "23:59"]], got
-    assert "grid-template-columns: var(--date-w, max-content)" in html and "--date-w" in html, "due dots not aligned"
+    assert "grid-template-columns: var(--date-w, max-content)" in html and "div.due {" in html and "--date-w" in html, "due dots not aligned"
 
 
 if __name__ == "__main__":

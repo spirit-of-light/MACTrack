@@ -19,11 +19,17 @@
   #edit { display: inline-flex; align-items: center; gap: .3rem; margin-top: 1rem; }
   .banner { background: var(--banner-bg); border: 1px solid var(--banner-border); padding: .4rem .6rem; margin: .3rem 0; }
   #sources { margin-top: 2rem; width: auto; color: var(--text-muted); }
-  /* Filters: course grid on the left, type grid in the centre, status column on the right */
-  #filters { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 1rem; margin: .8rem 0; }
-  .chips { display: grid; grid-template-columns: repeat(3, auto); gap: .3rem; }
-  #courses { justify-self: start; }
-  #statuses { justify-self: end; grid-template-columns: auto; }
+  /* Item list with the filter sidebar on its right; the sidebar stays in view while the list scrolls */
+  #layout { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; gap: 1.5rem; align-items: start; margin-top: .8rem; }
+  #filters { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+  .chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3rem; }
+  #statuses { grid-template-columns: 1fr; }
+  /* Edit mode needs the full width for its inputs, so the filters go above the list in a row; same on narrow screens */
+  #layout.editing { grid-template-columns: 1fr; }
+  #layout.editing #filters { position: static; order: -1; flex-direction: row; flex-wrap: wrap; align-items: start; }
+  #layout.editing .chips { width: 18rem; }
+  #layout.editing #courses { width: 24rem; }
+  @media (max-width: 900px) { #layout { grid-template-columns: 1fr; } #filters { position: static; order: -1; } }
   .chips > span { display: flex; }
   .chips > span > button:first-child { flex: 1; }
   .chips button { background: var(--bg); color: var(--text); border: 1px solid var(--text-faint);
@@ -44,12 +50,12 @@
   col.done { width: var(--tick, 1.2em); } /* checkmark width + 4px, measured at load */
   col.type { width: 6.5rem; } col.course { width: 8rem; } col.due { width: 9.5rem; } col.left { width: 7.5rem; }
   col.weight { width: 4.5rem; } col.mark { width: 6rem; } col.source { width: 6.5rem; } col.actions { width: 8.5rem; }
-  .editing col.done { width: 17px; } .editing col.due { width: 14rem; } .editing col.weight { width: 6rem; }
-  .editing col.mark { width: 10rem; }
+  .editing col.done { width: 17px; } .editing col.due { width: 13.5rem; } .editing col.weight { width: 6rem; }
+  .editing col.mark { width: 11rem; }
   /* Due cell: date right-aligned in a slot as wide as the widest date, so the dots line up */
-  .due { display: grid; grid-template-columns: var(--date-w, max-content) 6px max-content; gap: .35em; align-items: center; }
-  .due span:first-child { text-align: right; }
-  .due svg { width: 6px; height: 6px; }
+  div.due { display: grid; grid-template-columns: var(--date-w, max-content) 6px max-content; gap: .35em; align-items: center; }
+  div.due span:first-child { text-align: right; }
+  div.due svg { width: 6px; height: 6px; }
   tr.overdue { background: var(--overdue-bg); }
   tr.upcoming { background: var(--upcoming-bg); }
   tr.missing { opacity: .55; }
@@ -78,11 +84,6 @@
   <label>Upcoming window (days) <input id="days" type="number" min="1" style="width:4em"></label>
 </nav>
 <div id="calendar"></div>
-<div id="filters">
-  <div id="courses" class="chips" role="group" aria-label="Course"></div>
-  <div id="kinds" class="chips" role="group" aria-label="Type"></div>
-  <div id="statuses" class="chips" role="group" aria-label="Status"></div>
-</div>
 <form id="add">
   <strong>Add item</strong>
   <input name="course" list="known-courses" placeholder="Course" required>
@@ -95,10 +96,17 @@
   <input name="out_of" type="number" step="any" placeholder="Out of" style="width:5em">
   <button>Add</button>
 </form>
+<div id="layout">
 <main>
   <p id="summary" class="info"></p>
   <table id="items"><colgroup id="cols"></colgroup><thead id="head"></thead><tbody id="list"></tbody></table>
 </main>
+<aside id="filters">
+  <div id="courses" class="chips" role="group" aria-label="Course"></div>
+  <div id="kinds" class="chips" role="group" aria-label="Type"></div>
+  <div id="statuses" class="chips" role="group" aria-label="Status"></div>
+</aside>
+</div>
 <table id="sources">
   <thead><tr><th>Website</th><th>Status</th><th>Last synced</th></tr></thead>
   <tbody></tbody>
@@ -344,6 +352,7 @@ function render() {
 
   const cols = ['done', 'type', 'course', 'title', 'due', 'left', 'weight', 'mark', ...(editing() ? ['source', 'actions'] : [])];
   document.getElementById('items').classList.toggle('editing', editing());
+  document.getElementById('layout').classList.toggle('editing', editing());
   document.getElementById('cols').replaceChildren(...cols.map((c) => $('col', { className: c })));
   const done = $('th', { textContent: '✓', title: 'Done' });
   done.setAttribute('aria-label', 'Done');
