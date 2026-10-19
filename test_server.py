@@ -1743,7 +1743,8 @@ def test_index_login_links():
         f"LOGIN.crowdmark is not Avenue's entry URL: {vals['crowdmark']}"
     near = [html[max(0, i.start() - 600):i.start() + 600] for i in re.finditer(r"login needed", html)]
     link = r"(?:\$\(\s*['\"]a['\"]|createElement\(\s*['\"]a['\"])[^;]*?href\s*[:=]\s*LOGIN\[|\.href\s*=\s*LOGIN\["
-    assert any(re.search(link, w, re.S) for w in near), "the login-needed banner builds no <a> with href from LOGIN"
+    assert any(re.search(link, w, re.S) for w in near), "the login-needed status builds no <a> with href from LOGIN"
+    assert 'id="banners"' not in html, "top banners are back (developer removed them 2026-10-18)"
     assert any(re.search(r"noopener", w) for w in near), "sign-in link opened without rel=noopener"
     assert "innerHTML" not in html, "index.html uses innerHTML"
 

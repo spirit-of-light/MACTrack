@@ -7,7 +7,7 @@
   :root {
     --primary: #7A013C; --primary-hover: #5E012E; --primary-tint: #F6E6EE; --on-primary: #FFFFFF;
     --bg: #FFFFFF; --surface: #FAFAFA; --text: #222222; --text-muted: #666666; --text-faint: #888888; --border: #EEEEEE;
-    --overdue-bg: #FBD5D5; --overdue-text: #B3261E; --upcoming-bg: #FFF3C4; --banner-bg: #FDE2E1; --banner-border: #E0A3A0;
+    --overdue-bg: #FBD5D5; --overdue-text: #B3261E; --upcoming-bg: #FFF3C4;
     --weekend-bg: #F2F2F2;
   }
   html { overscroll-behavior: none; } /* no rubber-band bounce past the top or bottom (macOS) */
@@ -31,7 +31,6 @@
   td input[type=number]::-webkit-inner-spin-button, #add input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   tr.changed td:first-child { box-shadow: inset 3px 0 var(--primary); } /* unsaved edits */
   #edit { display: inline-flex; align-items: center; gap: .3rem; margin-top: 1rem; }
-  .banner { background: var(--banner-bg); border: 1px solid var(--banner-border); padding: .4rem .6rem; margin: .3rem 0; }
   #sources, #grades { margin-top: 2rem; width: auto; }
   #sources { color: var(--text-muted); }
   #grades td:first-child { color: var(--c); font-weight: 600; }
@@ -104,7 +103,6 @@
   tr.off { opacity: .5; }
   .day p.done { text-decoration: line-through; color: var(--text-muted); }
 </style>
-<div id="banners"></div>
 <div id="cal-wrap">
   <div id="top">
     <div id="next-up" class="next" role="region" aria-label="Next up"></div>
@@ -400,15 +398,13 @@ function render() {
   }));
   // Mode switch: pencil + Edit in view mode, page + View in edit mode
   document.getElementById('edit').replaceChildren(icon(editing() ? PAGE : PENCIL), editing() ? 'View' : 'Edit');
-  // AC30: one banner per source that needs attention; the other sources still render below.
-  document.getElementById('banners').replaceChildren(...Object.entries(status)
-    .filter(([, s]) => s.status !== 'ok')
-    .map(([src, s]) => (s.status === 'login needed'
-      ? $('div', { className: 'banner' }, `${src}: login needed — `,
-        $('a', { href: LOGIN[src], target: '_blank', rel: 'noopener', textContent: 'sign in' }), ', then sync again')
-      : $('div', { className: 'banner', textContent: `${src}: ${s.status}${s.error ? ` — ${s.error}` : ''}` }))));
+  // AC30: sync status per source in the bottom table; for "login needed" the word "login" is the sign-in link.
   document.querySelector('#sources tbody').replaceChildren(...Object.entries(status).map(([src, s]) => $('tr', {},
-    ...[src[0].toUpperCase() + src.slice(1), s.status, new Date(s.synced_at).toLocaleString()].map((t) => $('td', { textContent: t })))));
+    $('td', { textContent: src[0].toUpperCase() + src.slice(1) }),
+    $('td', {}, ...(s.status === 'login needed'
+      ? [$('a', { href: LOGIN[src], target: '_blank', rel: 'noopener', textContent: 'login' }), ' needed']
+      : [s.status])),
+    $('td', { textContent: new Date(s.synced_at).toLocaleString() }))));
 
   const all = [...new Set(data.items.map(courseOf))].sort();
   const hidden = hiddenCourses();
@@ -508,7 +504,7 @@ function render() {
   // Course grades under the list: every course shown in the course buttons (AC29)
   document.querySelector('#grades tbody').replaceChildren(...courses.filter((c) => c !== '(no course)').map((c) => {
     const g = data.courses[c] || { grade: null, graded_pct: 0 };
-    const tr = $('tr', {}, ...[c, g.grade == null ? '' : `${g.grade.toFixed(1)}%`,
+    const tr = $('tr', {}, ...[c, g.grade == null ? '—' : `${g.grade.toFixed(1)}%`, // AC83
       `${(g.graded_pct || 0).toFixed(0)}%${g.approximate ? ' (approximate)' : ''}`].map((t) => $('td', { textContent: t })));
     tr.style.setProperty('--c', colorOf(c));
     return tr;
