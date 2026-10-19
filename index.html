@@ -123,6 +123,11 @@
   .day p { margin: 0 0 .3rem; border-left: 4px solid var(--c); padding-left: .3rem; font-size: .9em; }
   .chips button.eye, .chips button.eye:hover { background: none; color: var(--c); border: 0; padding: 0 .2rem; vertical-align: middle; }
   tr.off { opacity: .5; }
+  .day .more { font-size: .85em; font-weight: 600; color: var(--text-muted); }
+  /* Page tooltip (replaces the browser's title tooltip): same outline and maroon edge as the filter buttons */
+  #tip { position: fixed; z-index: 10; max-width: 18rem; padding: .35rem .55rem; background: var(--bg); color: var(--text);
+    border: 1px solid var(--text-faint); border-left: 4px solid var(--primary); font-size: .85rem; white-space: pre-line;
+    pointer-events: none; }
   .day p.done { text-decoration: line-through; color: var(--text-muted); }
 </style>
 <div id="cal-wrap">
@@ -131,9 +136,9 @@
       <div id="calendar"></div>
     </div>
     <nav id="cal-nav">
-      <button id="cal-back" aria-label="Previous week" title="Previous week"></button>
-      <button id="cal-today" aria-label="Back to today" title="Back to today"></button>
-      <button id="cal-fwd" aria-label="Next week" title="Next week"></button>
+      <button id="cal-back" aria-label="Previous week" data-tip="Previous week"></button>
+      <button id="cal-today" aria-label="Back to today" data-tip="Back to today"></button>
+      <button id="cal-fwd" aria-label="Next week" data-tip="Next week"></button>
     </nav>
     <div id="next-test" class="next" role="region" aria-label="Next test"></div>
     <div id="next-lab" class="next" role="region" aria-label="Next lab"></div>
@@ -185,6 +190,7 @@
   <tbody></tbody>
 </table>
 <button id="edit"></button>
+<div id="tip" role="tooltip" hidden></div>
 <script>
 'use strict';
 // Spec 0002 AC16: copy of extension/parse.js SITES[*].login; Crowdmark signs in through Avenue (session default).
@@ -206,6 +212,7 @@ const roomOf = (title, info = []) => {
   return (info.find((f) => /room|location/i.test(f.name) && f.name.toLowerCase().startsWith(t)
     && !/^[a-z0-9]/i.test(f.name.slice(t.length))) || {}).value;
 };
+const tip = (el, text) => { el.dataset.tip = text; return el; }; // shown by the page tooltip, not the browser's
 const $ = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 const CAL_DAYS = 14; // calendar length: two rows of 7
 const STEP = 7; // the arrows move the calendar a week
@@ -369,14 +376,14 @@ function row(item) {
   };
   const orig = Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, raw(i)]));
   for (const [k, v] of Object.entries(pending.get(item.id)?.raw ?? {})) inputs[k][k === 'done' ? 'checked' : 'value'] = v;
-  const trash = $('button', { className: 'icon', title: `Delete ${item.title ?? ''}`, onclick: () => remove(item) }, icon(TRASH));
-  trash.setAttribute('aria-label', trash.title);
-  const tr = $('tr', { title: `From ${item.source}${item.missing ? ', missing from source' : ''}` },
+  const trash = tip($('button', { className: 'icon', onclick: () => remove(item) }, icon(TRASH)), `Delete ${item.title ?? ''}`);
+  trash.setAttribute('aria-label', trash.dataset.tip);
+  const tr = tip($('tr', {},
     $('td', {}, inputs.done), $('td', {}, inputs.kind), $('td', { className: 'course', textContent: courseOf(item) }),
     $('td', {}, inputs.title), $('td', {}, $('div', { className: 'pair' }, inputs.date, inputs.time)),
     $('td', { className: 'left', textContent: left(item) }), $('td', {}, inputs.weight),
     $('td', {}, $('div', { className: 'pair' }, inputs.mark, '/', inputs.out_of)),
-    $('td', { className: 'act' }, ...(item.source === 'manual' ? [trash] : [])));
+    $('td', { className: 'act' }, ...(item.source === 'manual' ? [trash] : []))), `From ${item.source}${item.missing ? ', missing from source' : ''}`);
   const track = () => { // record this row's changes for the one Save button
     const changed = Object.keys(inputs).filter((k) => raw(inputs[k]) !== orig[k]);
     const fields = Object.fromEntries(changed.filter((k) => k !== 'date' && k !== 'time').map((k) => [k, parsed(inputs[k])]));
@@ -425,7 +432,8 @@ function calendar(items, colorOf) {
         return p;
       }));
     cell.dataset.day = day;
-    cell.title = [...cell.querySelectorAll('p')].map((p) => p.textContent).join('\n'); // everything due, even if clipped
+    const due = [...cell.querySelectorAll('p')].map((p) => p.textContent);
+    if (due.length) tip(cell, [label, ...due].join('\n')); // everything due, even what "+N more" hides
     return cell;
   });
 }
@@ -463,9 +471,10 @@ function render() {
     b.classList.add('course');
     if (!editing()) return b;
     const off = hidden.includes(c);
-    const eye = $('button', { className: 'eye', title: off ? `Show ${c}` : `Hide ${c}`,
+    const eye = $('button', { className: 'eye',
       onclick: () => setHidden(off ? hidden.filter((h) => h !== c) : [...hidden, c]) });
-    eye.setAttribute('aria-label', eye.title);
+    tip(eye, off ? `Show ${c}` : `Hide ${c}`);
+    eye.setAttribute('aria-label', eye.dataset.tip);
     eye.style.setProperty('--c', colorOf(c));
     eye.append(icon(off ? EYE_SHUT : EYE));
     return $('span', { className: off ? 'off' : '' }, b, eye);
@@ -478,6 +487,15 @@ function render() {
   const picked = (c) => !course || c === course;
   const cal = document.getElementById('calendar');
   cal.replaceChildren(...calendar(data.items.filter((i) => visible.includes(courseOf(i)) && picked(courseOf(i)) && keep(i)), colorOf));
+  for (const day of cal.children) { // a day with more than fits hides its last items behind "+N more"
+    if (day.scrollHeight <= day.clientHeight) continue;
+    const items = [...day.querySelectorAll('p')];
+    const more = day.appendChild($('div', { className: 'more' }));
+    for (let n = 1; n <= items.length && day.scrollHeight > day.clientHeight; n++) {
+      items[items.length - n].hidden = true;
+      more.textContent = `+${n} more`;
+    }
+  }
 
   // Next test / Next lab: the soonest test (test, exam, midterm) and lab still ahead. Hidden courses and the course
   // filter apply. Hovering a row in the Tests or Labs table shows that item in its box as "Selected …".
@@ -490,7 +508,7 @@ function render() {
     el.replaceChildren($('h3', { textContent: heading }), i ? $('div', { className: 'body' },
       $('div', { className: 'who' },
         $('p', { className: 'course', textContent: courseOf(i) }),
-        $('p', { className: 'title', textContent: i.title ?? '', title: i.title ?? '' })),
+        tip($('p', { className: 'title', textContent: i.title ?? '' }), i.title ?? '')),
       $('div', { className: 'what' },
         ...[date, time].filter(Boolean).map((t) => $('p', { className: 'when', textContent: t })),
         ...[left(i) && (overdue(i) ? left(i) : `in ${left(i)}`), i.weight != null && `worth ${round2(i.weight)}%`, `Room ${room ?? 'TBD'}`]
@@ -518,7 +536,7 @@ function render() {
 
   const cols = ['done', 'type', 'course', 'title', 'due', 'left', 'weight', 'mark', ...(editing() ? ['actions'] : [])];
   document.getElementById('layout').classList.toggle('editing', editing());
-  const done = () => { const th = $('th', { textContent: '✓', title: 'Done' }); th.setAttribute('aria-label', 'Done'); return th; };
+  const done = () => { const th = tip($('th', { textContent: '✓' }), 'Done'); th.setAttribute('aria-label', 'Done'); return th; };
   const toRow = (i) => {
     const tr = row(i);
     tr.item = i; // for tick()
@@ -544,7 +562,7 @@ function render() {
   const parts = [['tests', shown.filter((i) => TESTS.includes(i.kind))], ['labs', shown.filter(isLab)],
     ['items', shown.filter((i) => !TESTS.includes(i.kind) && !isLab(i))]];
   for (const [id, items] of parts) {
-    const typed = id === 'items';
+    const typed = id === 'items' || editing(); // edit mode shows Type everywhere so a test or lab can be re-typed
     const table = document.getElementById(id);
     table.classList.toggle('editing', editing());
     table.querySelector('colgroup').replaceChildren(...cols.filter((c) => typed || c !== 'type').map((c) => $('col', { className: c })));
@@ -622,6 +640,21 @@ document.getElementById('cal-today').addEventListener('click', () => { calOffset
 const glyph = document.body.appendChild($('span', { textContent: '✓' })); // size the Done column to the glyph
 document.documentElement.style.setProperty('--tick', `${Math.ceil(glyph.getBoundingClientRect().width) + 4}px`);
 glyph.remove();
+// Page tooltip: any element with data-tip shows it below itself (above, near the bottom of the window).
+const tipBox = document.getElementById('tip');
+document.addEventListener('mouseover', (e) => {
+  const t = e.target.closest('[data-tip]');
+  tipBox.hidden = !t;
+  if (!t) return;
+  tipBox.textContent = t.dataset.tip;
+  const r = t.getBoundingClientRect();
+  const x = Math.min(Math.max(8, r.left + r.width / 2 - tipBox.offsetWidth / 2), innerWidth - tipBox.offsetWidth - 8);
+  const y = r.bottom + 6 + tipBox.offsetHeight > innerHeight - 8 ? r.top - tipBox.offsetHeight - 6 : r.bottom + 6;
+  tipBox.style.left = `${x}px`;
+  tipBox.style.top = `${y}px`;
+});
+document.documentElement.addEventListener('mouseleave', () => { tipBox.hidden = true; });
+document.addEventListener('scroll', () => { tipBox.hidden = true; }, true);
 load();
 </script>
 </html>

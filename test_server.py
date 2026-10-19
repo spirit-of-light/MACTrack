@@ -1929,7 +1929,7 @@ def test_index_calendar():
         "arrows do not move by a week"
     assert re.search(r"calOffset\s*=\s*0\b", html), "Today button does not reset the calendar"
     assert "onmouseenter: () => hl(true)" in html and "tr.dataset.day = day;" in html, "calendar hover does not highlight rows"
-    assert "'Source'" not in html and "title: `From ${item.source}" in html, "source is not a row tooltip in edit mode"
+    assert "'Source'" not in html and "`From ${item.source}${item.missing" in html, "source is not a row tooltip in edit mode"
 
 
 def test_index_hide_courses():
@@ -1955,7 +1955,7 @@ def test_index_single_list():
     assert "textContent: 'Hide done'" in html and "STATES" not in html, "status is not the single Hide done toggle"
     assert "tr.overdue { background: var(--overdue-bg); box-shadow: inset 3px 0 var(--overdue-text); }" in html, "overdue rows not red"
     assert ".chips { display: grid; grid-template-columns: 1fr;" in html, "filter groups are not single columns"
-    head = re.search(r"textContent: '✓', title: 'Done'.*?\['Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',", html, re.S)
+    head = re.search(r"tip\(\$\('th', \{ textContent: '✓' \}\), 'Done'\).*?\['Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',", html, re.S)
     assert head, "list columns are not Done | Type | Course | Title | Due | Time left | Weight | Mark"
     assert "upcoming }" not in html and "Upcoming'" not in html, "Upcoming still offered as a status"
     assert html.index('id="calendar"') < html.index('id="courses"'), "calendar is not above the filters"
@@ -1991,8 +1991,8 @@ def test_index_single_list():
         and "['items', shown.filter((i) => !TESTS.includes(i.kind) && !isLab(i))]" in html, "tests and labs are not split out"
     assert re.search(r'<div id="pair">\s*<div id="tests-part">.*?<div id="labs-part">.*?</div>\s*</div>\s*<div id="work-part">', html, re.S) \
         and "#pair { display: flex;" in html, "tests and labs are not side by side"
-    assert "const typed = id === 'items';" in html and "if (!typed) tr.children[1].remove();" in html, \
-        "tests or labs table still has a Type column"
+    assert "const typed = id === 'items' || editing();" in html and "if (!typed) tr.children[1].remove();" in html, \
+        "tests or labs table has a Type column in view mode, or none in edit mode"
     assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
     assert "round2(item.weight), markText(item)" in html and "round2(i.mark)" in html, "weight and mark not rounded in view mode"
 
@@ -2080,6 +2080,14 @@ for (const due of [2 * 864e5 + 36e5 * 4 + 6e4 * 30, 36e5 * 3 + 6e4 * 20 + 1e3 * 
 console.log(JSON.stringify(out));"""
     got = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
     assert got == [6e4 * 30, 1e3 * 15, 6e4], got
+
+
+def test_index_tooltips_and_more():
+    html = (ROOT / "index.html").read_text()
+    js = html.split("<script>")[1]
+    assert not re.search(r"\btitle\s*[:=]\s*[`'(]|\.title\s*=", js) and ' title="' not in html, "a browser title tooltip is left"
+    assert '<div id="tip" role="tooltip" hidden></div>' in html and "closest('[data-tip]')" in html, "no page tooltip"
+    assert "more.textContent = `+${n} more`;" in html, "full calendar days do not say +N more"
 
 
 if __name__ == "__main__":
