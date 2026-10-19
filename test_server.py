@@ -1973,6 +1973,7 @@ const out = [dueText(null, now), dueText(new Date(2026, 9, 20, 9, 5).toISOString
 console.log(JSON.stringify(out));"""
     got = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
     assert got == ["", "20 Oct | 09:05", "03 Jan 2027 | 23:59"], got
+    assert ".due { display: grid; grid-template-columns: 1fr auto 3em;" in html, "due date and time not aligned on |"
 
 
 if __name__ == "__main__":
