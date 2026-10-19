@@ -63,6 +63,14 @@
   /* Item list: fixed column widths so filtering never shifts columns; Title takes the rest */
   .items { table-layout: fixed; border-collapse: separate; border-spacing: 0; } /* separate borders: sticky titles paint cleanly in Firefox */
   .items td { overflow-wrap: anywhere; }
+  /* Tests and Labs side by side (stacked in edit mode, or full width when the other is empty), with narrower columns */
+  #pair { display: flex; gap: 1.5rem; align-items: flex-start; }
+  #pair > div { flex: 1; min-width: 0; }
+  #layout.editing #pair { display: block; }
+  #layout:not(.editing) #pair col.course { width: 7.5rem; } #layout:not(.editing) #pair col.due { width: 7rem; }
+  #layout:not(.editing) #pair col.left { width: 5rem; } #layout:not(.editing) #pair col.weight { width: 3.8rem; }
+  #layout:not(.editing) #pair col.mark { width: 4rem; }
+  #pair td { overflow-wrap: break-word; } /* break long words only when they cannot fit on a line of their own */
   .list-h { font-size: 1rem; margin: 1.2rem 0 .3rem; color: var(--primary); }
   .list-h:first-of-type { margin-top: .4rem; }
   .items th:first-child, .items td:first-child { padding: 0 2px; text-align: center; }
@@ -128,6 +136,7 @@
 <div id="layout">
 <main>
   <p id="summary" class="info"></p>
+  <div id="pair">
   <div id="tests-part">
     <h2 class="list-h">Tests</h2>
     <table id="tests" class="items"><colgroup></colgroup><thead></thead><tbody></tbody></table>
@@ -135,6 +144,7 @@
   <div id="labs-part">
     <h2 class="list-h">Labs</h2>
     <table id="labs" class="items"><colgroup></colgroup><thead></thead><tbody></tbody></table>
+  </div>
   </div>
   <div id="work-part">
     <h2 class="list-h">Coursework</h2>

@@ -1988,6 +1988,8 @@ def test_index_single_list():
     assert html.index('id="tests"') < html.index('id="labs"') < html.index('id="items"'), "tables are not Tests, Labs, Coursework"
     assert "['tests', shown.filter((i) => TESTS.includes(i.kind))], ['labs', shown.filter(isLab)]" in html \
         and "['items', shown.filter((i) => !TESTS.includes(i.kind) && !isLab(i))]" in html, "tests and labs are not split out"
+    assert re.search(r'<div id="pair">\s*<div id="tests-part">.*?<div id="labs-part">.*?</div>\s*</div>\s*<div id="work-part">', html, re.S) \
+        and "#pair { display: flex;" in html, "tests and labs are not side by side"
     assert "const typed = id === 'items';" in html and "if (!typed) tr.children[1].remove();" in html, \
         "tests or labs table still has a Type column"
     assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
