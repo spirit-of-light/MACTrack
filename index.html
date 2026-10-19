@@ -103,19 +103,23 @@
   /* Top bar: the calendar, its arrows, then the Next test box filling the rest */
   #top { display: flex; gap: .8rem; align-items: flex-start; padding-top: 1rem; } /* Next blocks keep their own height */
   #cal-col { flex: none; }
-  #next-test { flex: 1; min-width: 0; } /* fills the rest of the top bar */
+  #next-test, #next-lab { flex: 1; min-width: 0; } /* two equal boxes fill the rest of the top bar */
   /* Fixed boxes: 11rem wide, together as tall as the two calendar rows; long titles end in an ellipsis */
   .next { height: calc(2 * var(--day) + 1px); box-sizing: border-box; overflow: hidden; padding: .4rem .6rem;
     border: 1px solid var(--border); border-left: 4px solid var(--c, var(--border)); }
-  /* Text scales with the box width (cqw), capped; title near the top, date and details pushed to the bottom */
+  /* Text scales with the box width (cqw), capped. Course and title on the left; date, time, time left, weight and
+     room right-aligned opposite them, wrapping underneath (still right-aligned) when the box is narrow. */
   .next { display: flex; flex-direction: column; container-type: inline-size; }
   .next p { margin: 0 0 .2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .next h3 { font-size: .9rem; margin: 0 0 .4rem; color: var(--primary); }
-  .next .course { color: var(--c); font-weight: 600; font-size: clamp(1rem, 8cqw, 1.4rem); }
-  .next .title { font-size: clamp(1.5rem, 14cqw, 2.6rem); font-weight: 700; line-height: 1.15; white-space: normal;
+  .next .body { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .2rem .8rem; }
+  .next .who { flex: 1 1 8rem; min-width: 0; }
+  .next .what { margin-left: auto; text-align: right; min-width: 0; }
+  .next .course { color: var(--c); font-weight: 600; font-size: clamp(.8rem, 8cqw, 1.4rem); }
+  .next .title { font-size: clamp(1rem, 12cqw, 2.4rem); font-weight: 700; line-height: 1.15; white-space: normal; overflow-wrap: break-word;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .next .when { margin-top: auto; font-size: clamp(1.2rem, 11cqw, 2rem); font-weight: 600; }
-  .next .muted { color: var(--text-muted); font-size: clamp(.95rem, 7cqw, 1.3rem); }
+  .next .when { font-size: clamp(.95rem, 10cqw, 1.8rem); font-weight: 600; }
+  .next .muted { color: var(--text-muted); font-size: clamp(.8rem, 7cqw, 1.2rem); }
   .day p { margin: 0 0 .3rem; border-left: 4px solid var(--c); padding-left: .3rem; font-size: .9em; }
   .chips button.eye, .chips button.eye:hover { background: none; color: var(--c); border: 0; padding: 0 .2rem; vertical-align: middle; }
   tr.off { opacity: .5; }
@@ -132,6 +136,7 @@
       <button id="cal-fwd" aria-label="Next week" title="Next week"></button>
     </nav>
     <div id="next-test" class="next" role="region" aria-label="Next test"></div>
+    <div id="next-lab" class="next" role="region" aria-label="Next lab"></div>
   </div>
 </div>
 <div id="layout">
@@ -197,6 +202,7 @@ const typeButtons = () => TYPE_BUTTONS.filter((k) => editing() || k !== 'other')
 // Exams show and filter as tests. Stored kinds stay as they are: the server matches an "Exams" outline category by kind.
 const kindOf = (i) => (i.kind === 'exam' ? 'test' : i.kind);
 const TESTS = ['test', 'exam', 'midterm']; // what Next test picks from
+const isLab = (i) => i.kind === 'lab';
 // An info entry like "Test 1 Room: PGCLL B131" gives the room of the item titled "Test 1".
 const roomOf = (title, info = []) => {
   const t = (title ?? '').trim().toLowerCase();
@@ -479,29 +485,36 @@ function render() {
   const cal = document.getElementById('calendar');
   cal.replaceChildren(...calendar(data.items.filter((i) => visible.includes(courseOf(i)) && picked(courseOf(i)) && keep(i)), colorOf));
 
-  // Next test: the soonest test, exam or midterm still ahead. Hidden courses and the course filter apply.
+  // Next test / Next lab: the soonest test (test, exam, midterm) and lab still ahead. Hidden courses and the course
+  // filter apply. Hovering a row in the Tests or Labs table shows that item in its box as "Selected …".
   const ahead = data.items.filter((i) => shownKind(i) && !i.done && i.due && dueMs(i) >= Date.now() && visible.includes(courseOf(i))
     && picked(courseOf(i))).sort((a, b) => dueMs(a) - dueMs(b));
-  const block = (id, heading, i, empty, extra = []) => {
+  const box = (id, heading, i, empty, room) => {
     const el = document.getElementById(id);
     el.style.setProperty('--c', i ? colorOf(courseOf(i)) : '');
-    el.replaceChildren($('h3', { textContent: heading }), ...(i ? [
-      $('p', { className: 'course', textContent: courseOf(i) }),
-      $('p', { className: 'title', textContent: i.title ?? '', title: i.title ?? '' }),
-      $('p', { className: 'when', textContent: dueText(i.due).join(' • ') }),
-      $('p', { className: 'muted', textContent: [left(i) && (overdue(i) ? left(i) : `in ${left(i)}`),
-        i.weight != null && `worth ${round2(i.weight)}%`].filter(Boolean).join(', ') }),
-      ...extra.filter(Boolean).map((t) => $('p', { className: 'muted', textContent: t })),
-    ] : [$('p', { className: 'muted', textContent: empty })]));
+    const [date, time] = i ? dueText(i.due) : [];
+    el.replaceChildren($('h3', { textContent: heading }), i ? $('div', { className: 'body' },
+      $('div', { className: 'who' },
+        $('p', { className: 'course', textContent: courseOf(i) }),
+        $('p', { className: 'title', textContent: i.title ?? '', title: i.title ?? '' })),
+      $('div', { className: 'what' },
+        ...[date, time].filter(Boolean).map((t) => $('p', { className: 'when', textContent: t })),
+        ...[left(i) && (overdue(i) ? left(i) : `in ${left(i)}`), i.weight != null && `worth ${round2(i.weight)}%`, `Room ${room ?? 'TBD'}`]
+          .filter(Boolean).map((t) => $('p', { className: 'muted', textContent: t }))))
+      : $('p', { className: 'muted', textContent: empty }));
   };
+  const info = (i) => data.courses[courseOf(i)]?.info;
   const nextTest = ahead.find((i) => TESTS.includes(i.kind));
-  // Hovering a row in the Tests table shows that test here as "Selected test"; leaving it goes back to the next one.
-  showTest = (picked) => {
-    const i = picked || nextTest;
-    block('next-test', picked ? 'Selected test' : 'Next test', i, 'No tests scheduled',
-      [i && `Room ${roomOf(i.title, data.courses[courseOf(i)]?.info) ?? 'TBD'}`]);
+  const nextLab = ahead.find(isLab);
+  showPicked = (i) => { // i: a hovered test or lab, or null to show the next ones
+    const test = i && TESTS.includes(i.kind) ? i : null;
+    const lab = i && isLab(i) ? i : null;
+    box('next-test', test ? 'Selected test' : 'Next test', test || nextTest, 'No tests scheduled',
+      (test || nextTest) && roomOf((test || nextTest).title, info(test || nextTest)));
+    box('next-lab', lab ? 'Selected lab' : 'Next lab', lab || nextLab, 'No labs scheduled',
+      (lab || nextLab) && (roomOf((lab || nextLab).title, info(lab || nextLab)) ?? roomOf('Lab', info(lab || nextLab))));
   };
-  showTest(null);
+  showPicked(null);
 
   const g = data.courses[course] || { grade: null, graded_pct: 0 };
   const summary = document.getElementById('summary');
@@ -517,9 +530,9 @@ function render() {
     tr.item = i; // for tick()
     tr.style.setProperty('--c', colorOf(courseOf(i)));
     tr.classList.toggle('off', hidden.includes(courseOf(i)));
-    if (TESTS.includes(i.kind)) {
-      tr.addEventListener('mouseenter', () => showTest(i));
-      tr.addEventListener('mouseleave', () => showTest(null));
+    if (TESTS.includes(i.kind) || isLab(i)) {
+      tr.addEventListener('mouseenter', () => showPicked(i));
+      tr.addEventListener('mouseleave', () => showPicked(null));
     }
     if (i.due) { // local due date: calendar hover finds these rows, row hover finds its calendar day
       const day = localInput(i.due)[0];
@@ -534,7 +547,6 @@ function render() {
     .sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b)); // not done first, then by due date
   // Tests (test, exam, midterm) and labs get their own tables above the coursework. Each is one type, so it has no
   // Type column; the rest of the columns match, so they line up.
-  const isLab = (i) => i.kind === 'lab';
   const parts = [['tests', shown.filter((i) => TESTS.includes(i.kind))], ['labs', shown.filter(isLab)],
     ['items', shown.filter((i) => !TESTS.includes(i.kind) && !isLab(i))]];
   for (const [id, items] of parts) {
@@ -573,7 +585,7 @@ function render() {
 // Time left changes at whole hours of time remaining (whole minutes under a day). Refresh only those cells, and the
 // row's overdue/upcoming colour, exactly when the next one changes; nothing runs in between.
 let timed = []; // [row, item] for open items with a due date
-let showTest = () => {}; // set by render(): fills the Next test box with a given test, or the next one
+let showPicked = () => {}; // set by render(): fills the Next test / Next lab boxes with a hovered item, or the next ones
 let tickTimer;
 function tick() {
   clearTimeout(tickTimer);

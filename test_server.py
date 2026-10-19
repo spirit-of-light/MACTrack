@@ -1968,7 +1968,7 @@ def test_index_single_list():
         "page top margin makes the top bar jump when it pins"
     assert "grid-template-columns: repeat(7, var(--day)); grid-auto-rows: var(--day);" in html and "--day: 8.5rem;" in html, \
         "calendar days are not fixed squares"
-    assert ".next { height: calc(2 * var(--day) + 1px);" in html and "#next-test { flex: 1;" in html, \
+    assert ".next { height: calc(2 * var(--day) + 1px);" in html and "#next-test, #next-lab { flex: 1;" in html, \
         "Next test box does not fill the rest of the top bar at the calendar's height"
     assert "dateTime(s.synced_at)" in html and "alignDots(document.getElementById('sources'))" in html, \
         "Last synced is not in the due-date style"
@@ -2032,12 +2032,15 @@ def test_index_single_save():
 def test_index_next_blocks_and_row_hover():
     html = (ROOT / "index.html").read_text()
     top = re.search(r'<div id="top">(.*?)<div id="layout">', html, re.S)[1]
-    assert top.index('id="calendar"') < top.index('id="next-test"') and 'id="next-up"' not in html, \
-        "top bar is not the calendar then Next test, or Next up is back"
+    assert top.index('id="calendar"') < top.index('id="next-test"') < top.index('id="next-lab"') and 'id="next-up"' not in html, \
+        "top bar is not the calendar, Next test, Next lab"
+    assert "#next-test, #next-lab { flex: 1;" in html, "the two boxes do not share the rest of the top bar"
+    assert "const nextLab = ahead.find(isLab);" in html and "lab ? 'Selected lab' : 'Next lab'" in html, "no Next lab box"
+    assert ".next .what { margin-left: auto; text-align: right;" in html, "details are not right-aligned opposite the titles"
     assert "ahead.find((i) => TESTS.includes(i.kind))" in html, "Next test picks the wrong item"
-    assert "?? 'TBD'}`" in html, "a test with no known room does not say TBD"
-    assert "picked ? 'Selected test' : 'Next test'" in html and "tr.addEventListener('mouseenter', () => showTest(i));" in html \
-        and "tr.addEventListener('mouseleave', () => showTest(null));" in html, "hovering a test does not show it in the box"
+    assert "`Room ${room ?? 'TBD'}`" in html, "an item with no known room does not say TBD"
+    assert "test ? 'Selected test' : 'Next test'" in html and "tr.addEventListener('mouseenter', () => showPicked(i));" in html \
+        and "tr.addEventListener('mouseleave', () => showPicked(null));" in html, "hovering a test or lab does not show it in its box"
     assert "container-type: inline-size;" in html and ".next .title { font-size: clamp(" in html, "Next test text does not scale with its box"
     assert "id === 'tests' && h === 'Due' ? 'Time' : h" in html, "tests table still says Due"
     assert "querySelector(`#calendar .day[data-day=\"${day}\"]`)" in html and "cell.dataset.day = day;" in html, \
