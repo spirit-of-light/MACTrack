@@ -540,7 +540,7 @@ function render() {
   document.querySelector('#grades tbody').replaceChildren(...courses.filter((c) => c !== '(no course)').map((c) => {
     const g = data.courses[c] || { grade: null, graded_pct: 0 };
     const tr = $('tr', {}, ...[c, g.grade == null ? '—' : `${g.grade.toFixed(1)}%`, // AC83
-      `${(g.graded_pct || 0).toFixed(0)}%${g.approximate ? ' (approximate)' : ''}`].map((t) => $('td', { textContent: t })));
+      `${(g.graded_pct || 0).toFixed(0)}%`].map((t) => $('td', { textContent: t })));
     tr.style.setProperty('--c', colorOf(c));
     return tr;
   }));
