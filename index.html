@@ -18,7 +18,7 @@
   p:has(#edit), #add { background: var(--surface); padding: .4rem .6rem; }
   p:has(#edit:checked) { background: var(--primary-tint); }
   .banner { background: var(--banner-bg); border: 1px solid var(--banner-border); padding: .4rem .6rem; margin: .3rem 0; }
-  #sources { color: var(--text-muted); }
+  #sources { margin-top: 2rem; width: auto; color: var(--text-muted); }
   .chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: .4rem 0; }
   .chips button { background: var(--bg); color: var(--text); border: 1px solid var(--text-faint);
     border-left: 4px solid var(--c, var(--text-faint)); }
@@ -52,7 +52,6 @@
 </style>
 <h1>MacTracker</h1>
 <div id="banners"></div>
-<p id="sources"></p>
 <nav id="cal-nav">
   <button id="cal-back" aria-label="Previous days">←</button>
   <button id="cal-today">Today</button>
@@ -82,6 +81,10 @@
   <p id="summary" class="info"></p>
   <table><thead id="head"></thead><tbody id="list"></tbody></table>
 </main>
+<table id="sources">
+  <thead><tr><th>Website</th><th>Status</th><th>Last synced</th></tr></thead>
+  <tbody></tbody>
+</table>
 <script>
 'use strict';
 // Spec 0002 AC16: copy of extension/parse.js SITES[*].login; Crowdmark signs in through Avenue (session default).
@@ -260,8 +263,8 @@ function render() {
       ? $('div', { className: 'banner' }, `${src}: login needed — `,
         $('a', { href: LOGIN[src], target: '_blank', rel: 'noopener', textContent: 'sign in' }), ', then sync again')
       : $('div', { className: 'banner', textContent: `${src}: ${s.status}${s.error ? ` — ${s.error}` : ''}` }))));
-  document.getElementById('sources').textContent = Object.entries(status)
-    .map(([src, s]) => `${src}: ${s.status}, synced ${new Date(s.synced_at).toLocaleString()}`).join(' · ');
+  document.querySelector('#sources tbody').replaceChildren(...Object.entries(status).map(([src, s]) => $('tr', {},
+    ...[src[0].toUpperCase() + src.slice(1), s.status, new Date(s.synced_at).toLocaleString()].map((t) => $('td', { textContent: t })))));
 
   const all = [...new Set(data.items.map(courseOf))].sort();
   const hidden = hiddenCourses();
