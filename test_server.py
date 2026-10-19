@@ -2011,8 +2011,10 @@ def test_index_single_save():
 
 def test_index_next_blocks_and_row_hover():
     html = (ROOT / "index.html").read_text()
-    top = re.search(r'<div id="top">(.*?)<div id="calendar">', html, re.S)[1] + 'id="calendar"'
-    assert top.index('id="next-up"') < top.index('id="next-test"') < top.index('id="calendar"'), "top bar is not Next up, Next test, calendar"
+    top = re.search(r'<div id="top">(.*?)<div id="layout">', html, re.S)[1]
+    assert top.index('id="calendar"') < top.index('id="next-col"') < top.index('id="next-up"') < top.index('id="next-test"'), \
+        "top bar is not the calendar, then Next up over Next test"
+    assert "#next-col {" in html and "flex-direction: column" in html, "Next blocks are not stacked"
     assert "ahead.find((i) => !TESTS.includes(i.kind))" in html and "ahead.find((i) => TESTS.includes(i.kind))" in html, \
         "Next up / Next test pick the wrong items"
     assert "querySelector(`#calendar .day[data-day=\"${day}\"]`)" in html and "cell.dataset.day = day;" in html, \

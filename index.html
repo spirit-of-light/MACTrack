@@ -89,10 +89,11 @@
   .day.today h3 { color: var(--primary); }
   .day.weekend { background: var(--weekend-bg); }
   .day.hl { background: var(--primary-tint); box-shadow: inset 0 0 0 2px var(--primary); } /* hovered row's due day */
-  /* Top bar: Next up, Next test, then the calendar column */
+  /* Top bar: the calendar column, then Next up and Next test stacked on its right */
   #top { display: flex; gap: .8rem; align-items: flex-start; } /* Next blocks keep their own height */
   #cal-col { flex: 1; min-width: 0; }
-  .next { flex: 0 0 11rem; margin-top: 3rem; padding: .4rem .6rem; border: 1px solid var(--border);
+  #next-col { flex: 0 0 11rem; margin-top: 3rem; display: flex; flex-direction: column; gap: .6rem; }
+  .next { padding: .4rem .6rem; border: 1px solid var(--border);
     border-left: 4px solid var(--c, var(--border)); overflow-wrap: anywhere; }
   .next h3 { font-size: .9rem; margin: 0 0 .3rem; color: var(--primary); }
   .next p { margin: 0 0 .15rem; }
@@ -105,8 +106,6 @@
 </style>
 <div id="cal-wrap">
   <div id="top">
-    <div id="next-up" class="next" role="region" aria-label="Next up"></div>
-    <div id="next-test" class="next" role="region" aria-label="Next test"></div>
     <div id="cal-col">
       <nav id="cal-nav">
         <button id="cal-back" aria-label="Previous days">←</button>
@@ -115,6 +114,10 @@
         <span id="windows" role="group" aria-label="Upcoming window (days)"></span>
       </nav>
       <div id="calendar"></div>
+    </div>
+    <div id="next-col">
+      <div id="next-up" class="next" role="region" aria-label="Next up"></div>
+      <div id="next-test" class="next" role="region" aria-label="Next test"></div>
     </div>
   </div>
 </div>
