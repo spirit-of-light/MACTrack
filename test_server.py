@@ -1956,7 +1956,9 @@ def test_index_single_list():
     assert "upcoming }" not in html and "Upcoming'" not in html, "Upcoming still offered as a status"
     assert html.index('id="calendar"') < html.index('id="courses"'), "calendar is not above the filters"
     assert re.search(r'<div id="layout">\s*<main>.*?</main>\s*<aside id="filters">', html, re.S), "filters are not a sidebar right of the list"
-    assert re.search(r'<main>\s*<div id="cal-wrap">.*?id="calendar".*?</div>\s*<p id="summary"', html, re.S), "calendar is not in the list column"
+    assert re.search(r'<div id="cal-wrap">.*?id="calendar".*?<div id="layout">\s*<main>\s*<p id="summary"', html, re.S), \
+        "top bar is not full width above the list and sidebar"
+    assert "#filters { position: sticky; top: var(--head-top, 0);" in html, "sidebar does not stick below the calendar"
     assert "#cal-wrap.pinned { position: sticky;" in html and "classList.toggle('pinned', days() <= 14)" in html, \
         "calendar does not stay in view only while N <= 14"
     assert re.search(r"#items thead th \{ position: sticky; top: var\(--head-top", html), "column titles do not follow scrolling"

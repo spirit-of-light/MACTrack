@@ -40,7 +40,7 @@
   #cal-wrap { background: var(--bg); padding-bottom: .4rem; }
   #cal-wrap.pinned { position: sticky; top: 0; z-index: 2; } /* only while N <= 14 */
   #items thead th { position: sticky; top: var(--head-top, 0); z-index: 1; background: var(--bg); } /* column titles stay below the calendar */
-  #filters { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; box-sizing: border-box; padding-top: 1rem;
+  #filters { position: sticky; top: var(--head-top, 0); max-height: calc(100vh - var(--head-top, 0px)); overflow-y: auto; box-sizing: border-box; padding-top: 1rem;
     display: flex; flex-direction: column; gap: 1rem; }
   .chips { display: grid; grid-template-columns: 1fr; gap: .3rem; } /* one vertical column per filter group */
   @media (max-width: 900px) { #layout { grid-template-columns: 1fr; } #filters { position: static; order: -1; max-height: none; } }
@@ -87,7 +87,7 @@
   .day.weekend { background: var(--weekend-bg); }
   .day.hl { background: var(--primary-tint); box-shadow: inset 0 0 0 2px var(--primary); } /* hovered row's due day */
   /* Top bar: Next up, Next test, then the calendar column */
-  #top { display: flex; gap: .8rem; align-items: stretch; }
+  #top { display: flex; gap: .8rem; align-items: flex-start; } /* Next blocks keep their own height */
   #cal-col { flex: 1; min-width: 0; }
   .next { flex: 0 0 11rem; margin-top: 3rem; padding: .4rem .6rem; border: 1px solid var(--border);
     border-left: 4px solid var(--c, var(--border)); overflow-wrap: anywhere; }
@@ -101,23 +101,23 @@
   .day p.done { text-decoration: line-through; color: var(--text-muted); }
 </style>
 <div id="banners"></div>
-<div id="layout">
-<main>
-  <div id="cal-wrap">
-    <div id="top">
-      <div id="next-up" class="next" role="region" aria-label="Next up"></div>
-      <div id="next-test" class="next" role="region" aria-label="Next test"></div>
-      <div id="cal-col">
-        <nav id="cal-nav">
-          <button id="cal-back" aria-label="Previous days">←</button>
-          <button id="cal-today">Today</button>
-          <button id="cal-fwd" aria-label="Next days">→</button>
-          <span id="windows" role="group" aria-label="Upcoming window (days)"></span>
-        </nav>
-        <div id="calendar"></div>
-      </div>
+<div id="cal-wrap">
+  <div id="top">
+    <div id="next-up" class="next" role="region" aria-label="Next up"></div>
+    <div id="next-test" class="next" role="region" aria-label="Next test"></div>
+    <div id="cal-col">
+      <nav id="cal-nav">
+        <button id="cal-back" aria-label="Previous days">←</button>
+        <button id="cal-today">Today</button>
+        <button id="cal-fwd" aria-label="Next days">→</button>
+        <span id="windows" role="group" aria-label="Upcoming window (days)"></span>
+      </nav>
+      <div id="calendar"></div>
     </div>
   </div>
+</div>
+<div id="layout">
+<main>
   <p id="summary" class="info"></p>
   <table id="items"><colgroup id="cols"></colgroup><thead id="head"></thead><tbody id="list"></tbody></table>
 </main>
@@ -496,7 +496,7 @@ function render() {
 function pin() {
   const wrap = document.getElementById('cal-wrap');
   wrap.classList.toggle('pinned', days() <= 14);
-  document.getElementById('items').style.setProperty('--head-top', `${days() <= 14 ? wrap.offsetHeight : 0}px`);
+  document.documentElement.style.setProperty('--head-top', `${days() <= 14 ? wrap.offsetHeight : 0}px`); // column titles and sidebar
 }
 window.addEventListener('resize', pin);
 
