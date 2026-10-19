@@ -1926,6 +1926,7 @@ def test_index_calendar():
     assert "days()" in cal, "calendar length is not the upcoming window N"
     assert re.search(r"calOffset\s*-=\s*days\(\)", html) and re.search(r"calOffset\s*\+=\s*days\(\)", html), "arrows do not move by N days"
     assert re.search(r"calOffset\s*=\s*0\b", html), "Today button does not reset the calendar"
+    assert "onmouseenter: () => hl(true)" in html and "tr.dataset.day = localInput(i.due)[0]" in html, "calendar hover does not highlight rows"
     assert "'Source'" not in html and "title: `From ${item.source}" in html, "source is not a row tooltip in edit mode"
 
 

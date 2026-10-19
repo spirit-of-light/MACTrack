@@ -72,6 +72,7 @@
   tr.overdue { background: var(--overdue-bg); }
   tr.upcoming { background: var(--upcoming-bg); }
   tr.missing { opacity: .55; }
+  tr.hl { background: var(--primary-tint); box-shadow: inset 3px 0 var(--primary); } /* due on the hovered calendar day */
   .info { color: var(--text-muted); margin: 0 0 .3rem; }
   #cal-nav { display: flex; align-items: center; gap: .3rem; padding: 1rem 0 .4rem; margin: 0; }
   #cal-nav label { margin-left: .8rem; }
@@ -328,8 +329,10 @@ function calendar(items, colorOf) {
     const to = new Date(from);
     to.setDate(from.getDate() + 1);
     const today = calOffset + k === 0;
+    const day = localInput(from.toISOString())[0];
+    const hl = (on) => document.querySelectorAll(`#list tr[data-day="${day}"]`).forEach((tr) => tr.classList.toggle('hl', on));
     const label = from.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    return $('div', { className: today ? 'day today' : 'day' },
+    return $('div', { className: today ? 'day today' : 'day', onmouseenter: () => hl(true), onmouseleave: () => hl(false) },
       $('h3', { textContent: today ? `${label} (today)` : label }),
       ...items.filter((i) => dueMs(i) >= from && dueMs(i) < to).sort((a, b) => dueMs(a) - dueMs(b)).map((i) => {
         const c = i.course ?? '(no course)';
@@ -409,6 +412,7 @@ function render() {
       const tr = row(i);
       tr.style.setProperty('--c', colorOf(courseOf(i)));
       tr.classList.toggle('off', hidden.includes(courseOf(i)));
+      if (i.due) tr.dataset.day = localInput(i.due)[0]; // local due date, matched by calendar hover
       return tr;
     }));
   // Line the dots up: size every date slot to the widest date shown, measured with the slot unset
