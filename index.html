@@ -46,9 +46,6 @@
   col.weight { width: 4.5rem; } col.mark { width: 6rem; } col.source { width: 6.5rem; } col.actions { width: 8.5rem; }
   .editing col.done { width: 17px; } .editing col.due { width: 14rem; } .editing col.weight { width: 6rem; }
   .editing col.mark { width: 10rem; }
-  /* Due cell: date left-aligned, | at the same spot in every row, time right-aligned */
-  .due { display: grid; grid-template-columns: 1fr auto 3em; gap: .4em; margin-right: .6em; }
-  .due span:last-child { text-align: right; }
   tr.overdue { background: var(--overdue-bg); }
   tr.upcoming { background: var(--upcoming-bg); }
   tr.missing { opacity: .55; }
@@ -226,8 +223,6 @@ function row(item) {
       dueText(item.due), left(item), round2(item.weight), markText(item)]
       .map((t) => $('td', { textContent: String(t) })));
     tr.children[2].className = 'course';
-    if (item.due) tr.children[4].replaceChildren($('div', { className: 'due' },
-      ...dueText(item.due).split(' | ').flatMap((t, n) => [...(n ? [$('span', { textContent: '|' })] : []), $('span', { textContent: t })])));
     tr.classList.toggle('overdue', overdue(item));
     tr.classList.toggle('upcoming', upcoming(item));
     tr.classList.toggle('missing', !!item.missing);
