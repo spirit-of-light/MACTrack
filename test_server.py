@@ -1911,7 +1911,8 @@ def test_index_view_edit_mode():
     assert re.search(r"localStorage\.getItem\(\s*['\"]editMode['\"]\s*\)", html), "edit mode not read from localStorage"
     assert re.search(r"localStorage\.setItem\(\s*['\"]editMode['\"]", html), "edit mode not saved to localStorage"
     assert not any("editMode" in a for a in fetch_calls(html)), "edit mode sent to the server"
-    assert re.search(r"id=['\"]edit['\"]", html) and "Edit mode" in html, "no Edit mode toggle"
+    assert re.search(r"<button id=['\"]edit['\"]", html) and "'View' : 'Edit'" in html, "no Edit/View toggle button"
+    assert html.index('id="edit"') > html.index('id="sources"'), "Edit button is not at the bottom"
     assert re.search(r"getElementById\(\s*['\"]add['\"]\s*\)\.hidden\s*=", html), "add form not hidden in view mode"
     row = re.search(r"function row\(item\)\s*\{(.*?)\n\}", html, re.S)[1]
     assert re.search(r"if\s*\(\s*!editing\(\)\s*\)", row), "row() has no plain view branch"
@@ -1953,6 +1954,9 @@ def test_index_single_list():
     assert ".sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b))" in html, "done items not listed after open ones"
     assert re.search(r"<th>Website</th><th>Status</th><th>Last synced</th>", html), "no sync status table"
     assert html.index('id="sources"') > html.index("</main>"), "sync table is not below the item list"
+    assert "TYPE_BUTTONS, kind" in html and re.search(r"TYPE_BUTTONS = KINDS\.filter\(\(k\) => k !== 'midterm' && k !== 'homework'\)", html), \
+        "midterm and homework still have type buttons"
+    assert re.search(r"const KINDS = \[[^\]]*'midterm'[^\]]*'homework'", html), "midterm or homework dropped from KINDS"
     assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
     assert "round2(item.weight), markText(item)" in html and "round2(i.mark)" in html, "weight and mark not rounded in view mode"
 
