@@ -1962,6 +1962,8 @@ def test_index_single_list():
         "top bar is not full width above the list and sidebar"
     assert "#filters { position: sticky; top: var(--head-top, 0);" in html, "sidebar does not stick below the calendar"
     assert "#cal-wrap { position: sticky;" in html, "calendar does not stay in view"
+    assert "grid-template-columns: repeat(7, var(--day)); grid-auto-rows: var(--day); --day: 8.5rem;" in html, \
+        "calendar days are not fixed squares"
     assert re.search(r"#items thead th \{ position: sticky; top: var\(--head-top", html), "column titles do not follow scrolling"
     assert 'id="windows"' not in html and "upcomingDays" not in html, "window buttons are back"
     top = re.search(r'<div id="top">(.*?)<div id="layout">', html, re.S)[1]

@@ -80,18 +80,18 @@
   .info { color: var(--text-muted); margin: 0 0 .3rem; }
   #cal-nav { display: flex; flex-direction: column; gap: .3rem; } /* up: back a week, circle: today, down: forward a week */
   #cal-nav button { padding: .25rem .35rem; line-height: 0; }
-  /* 7 equal columns whatever N is; more days wrap to new rows; every row as tall as the tallest */
-  #calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: 1fr;
+  /* Fixed square days, 7 per row; a day with more than fits clips, and its tooltip lists everything */
+  #calendar { display: grid; grid-template-columns: repeat(7, var(--day)); grid-auto-rows: var(--day); --day: 8.5rem;
     border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
   .day { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: .3rem .4rem;
-    min-height: 5rem; overflow-wrap: anywhere; }
+    box-sizing: border-box; overflow: hidden; overflow-wrap: anywhere; }
   .day h3 { font-size: .9rem; margin: 0 0 .3rem; }
   .day.today h3 { color: var(--primary); }
   .day.weekend { background: var(--weekend-bg); }
   .day.hl { background: var(--primary-tint); box-shadow: inset 0 0 0 2px var(--primary); } /* hovered row's due day */
   /* Top bar: the calendar column, then Next up and Next test stacked on its right */
   #top { display: flex; gap: .8rem; align-items: flex-start; padding-top: 1rem; } /* Next blocks keep their own height */
-  #cal-col { flex: 1; min-width: 0; }
+  #cal-col { flex: none; }
   #next-col { flex: 0 0 11rem; display: flex; flex-direction: column; gap: .6rem; }
   .next { padding: .4rem .6rem; border: 1px solid var(--border);
     border-left: 4px solid var(--c, var(--border)); overflow-wrap: anywhere; }
@@ -383,6 +383,7 @@ function calendar(items, colorOf) {
         return p;
       }));
     cell.dataset.day = day;
+    cell.title = [...cell.querySelectorAll('p')].map((p) => p.textContent).join('\n'); // everything due, even if clipped
     return cell;
   });
 }
