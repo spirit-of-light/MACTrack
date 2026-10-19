@@ -1326,7 +1326,7 @@ def test_index_static():
     for a in edits:
         assert re.search(r"method\s*:\s*['\"]POST['\"]", a) and "application/json" in a, f"edit POST not JSON: {a[:160]}"
     assert not re.search(r"x-token|token\.txt", html, re.I), "page references the ingest token (AC35: only the extension holds it)"
-    assert re.search(r"localStorage\.getItem\([^)]*\)\)*\s*(?:\|\||\?\?)\s*['\"]?7\b", html), "upcoming window does not default to 7 days (AC41)"
+    assert "const UPCOMING_DAYS = 7;" in html and "UPCOMING_DAYS * 864e5" in html, "upcoming window is not 7 days (AC41)"
     assert "login needed" in html, "no login-needed banner text (AC30)"
     assert "—" in html or "&mdash;" in html, "no — for an ungraded course (AC83)"
     assert not re.search(r"""(?:src|href)\s*=\s*['"]?(?:https?:)?//|@import""", html, re.I), "external resource (page must work offline)"
@@ -1924,8 +1924,9 @@ def test_index_calendar():
     for id_ in ("calendar", "cal-back", "cal-fwd", "cal-today"):
         assert re.search(rf"id=['\"]{id_}['\"]", html), f"no #{id_}"
     cal = re.search(r"function calendar\(.*?\n\}", html, re.S)[0]
-    assert "days()" in cal, "calendar length is not the upcoming window N"
-    assert re.search(r"calOffset\s*-=\s*days\(\)", html) and re.search(r"calOffset\s*\+=\s*days\(\)", html), "arrows do not move by N days"
+    assert "length: CAL_DAYS" in cal and "const CAL_DAYS = 14;" in html, "calendar is not 14 days"
+    assert re.search(r"calOffset\s*-=\s*STEP", html) and re.search(r"calOffset\s*\+=\s*STEP", html) and "const STEP = 7;" in html, \
+        "arrows do not move by a week"
     assert re.search(r"calOffset\s*=\s*0\b", html), "Today button does not reset the calendar"
     assert "onmouseenter: () => hl(true)" in html and "tr.dataset.day = day;" in html, "calendar hover does not highlight rows"
     assert "'Source'" not in html and "title: `From ${item.source}" in html, "source is not a row tooltip in edit mode"
@@ -1960,11 +1961,13 @@ def test_index_single_list():
     assert re.search(r'<div id="cal-wrap">.*?id="calendar".*?<div id="layout">\s*<main>\s*<p id="summary"', html, re.S), \
         "top bar is not full width above the list and sidebar"
     assert "#filters { position: sticky; top: var(--head-top, 0);" in html, "sidebar does not stick below the calendar"
-    assert "#cal-wrap.pinned { position: sticky;" in html and "classList.toggle('pinned', days() <= 14)" in html, \
-        "calendar does not stay in view only while N <= 14"
+    assert "#cal-wrap { position: sticky;" in html, "calendar does not stay in view"
     assert re.search(r"#items thead th \{ position: sticky; top: var\(--head-top", html), "column titles do not follow scrolling"
-    assert re.search(r'<nav id="cal-nav">(?:(?!</nav>).)*id="windows"', html, re.S), "upcoming window not beside the calendar arrows"
-    assert "const WINDOWS = [7, 14, 30];" in html and 'id="days"' not in html, "upcoming window is not 7 / 14 / 30 buttons"
+    assert 'id="windows"' not in html and "upcomingDays" not in html, "window buttons are back"
+    top = re.search(r'<div id="top">(.*?)<div id="layout">', html, re.S)[1]
+    assert top.index('id="calendar"') < top.index('id="cal-nav"') < top.index('id="next-col"'), "arrows are not right of the calendar"
+    assert re.search(r'id="cal-back".*?id="cal-today".*?id="cal-fwd"', top, re.S) and "flex-direction: column; gap: .3rem; } /* up:" in html, \
+        "arrows are not up / today / down in a column"
     assert "from.getDay() === 0 || from.getDay() === 6" in html and ".day.weekend { background: var(--weekend-bg); }" in html, \
         "weekend days not grey"
     assert ".sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b))" in html, "done items not listed after open ones"
