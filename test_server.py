@@ -2023,6 +2023,17 @@ console.log(JSON.stringify([roomOf('Test 1', info), roomOf('Test 2', info), room
     assert got == ["PGCLL B131", None, "X", None], got
 
 
+def test_index_grades_links_empty_unload_filters():
+    html = (ROOT / "index.html").read_text()
+    assert html.index('id="items"') < html.index('id="grades"') < html.index('id="sources"'), "grades table is not after the list"
+    assert "<th>Course</th><th>Grade</th><th>Graded</th>" in html, "no Course | Grade | Graded table"
+    assert "/^https?:\\/\\//i.test(item.url ?? '')" in html and "href: item.url" in html, "titles do not link to http(s) urls only"
+    assert "No items match these filters." in html and "'Clear filters'" in html, "no empty state"
+    assert "addEventListener('beforeunload'" in html and "if (pending.size) e.preventDefault()" in html, "no unsaved-edits warning"
+    assert "localStorage.getItem('filters')" in html and "localStorage.setItem('filters'" in html, "filters not remembered"
+    assert not any("filters" in a for a in fetch_calls(html)), "filters sent to the server"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]:

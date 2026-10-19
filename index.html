@@ -32,7 +32,11 @@
   tr.changed td:first-child { box-shadow: inset 3px 0 var(--primary); } /* unsaved edits */
   #edit { display: inline-flex; align-items: center; gap: .3rem; margin-top: 1rem; }
   .banner { background: var(--banner-bg); border: 1px solid var(--banner-border); padding: .4rem .6rem; margin: .3rem 0; }
-  #sources { margin-top: 2rem; width: auto; color: var(--text-muted); }
+  #sources, #grades { margin-top: 2rem; width: auto; }
+  #sources { color: var(--text-muted); }
+  #grades td:first-child { color: var(--c); font-weight: 600; }
+  #items tbody td.empty { padding: 1rem .3rem; text-align: left; color: var(--text-muted); } /* beats the ✓ column centring */
+  #items td.empty button { margin-left: .6rem; }
   /* Item list with the filter sidebar on its right; the sidebar stays in view while the list scrolls */
   #layout { display: grid; grid-template-columns: minmax(0, 1fr) 9rem; gap: 1.5rem; align-items: start; }
   /* Calendar and sidebar both stay in view while the list scrolls under the calendar */
@@ -120,6 +124,10 @@
 <main>
   <p id="summary" class="info"></p>
   <table id="items"><colgroup id="cols"></colgroup><thead id="head"></thead><tbody id="list"></tbody></table>
+  <table id="grades">
+    <thead><tr><th>Course</th><th>Grade</th><th>Graded</th></tr></thead>
+    <tbody></tbody>
+  </table>
 </main>
 <aside id="filters">
   <button id="save">Save</button>
@@ -193,9 +201,11 @@ const EYE_SHUT = 'M2 10c3 4 6.5 6 10 6s7-2 10-6M5 13l-2 3M12 16v3M19 13l2 3';
 let data = { items: [], courses: {} };
 let status = {};
 let calOffset = 0; // calendar start, in days from today; not saved
-let course = ''; // course and type filters; '' is All; not saved
-let kind = '';
-let hideDone = false; // status filter: one toggle; not saved
+// Filters: course and type ('' is All) and Hide done; remembered in this browser only
+const savedFilters = (() => { try { return JSON.parse(localStorage.getItem('filters')) || {}; } catch { return {}; } })();
+let course = savedFilters.course ?? '';
+let kind = savedFilters.kind ?? '';
+let hideDone = !!savedFilters.hideDone;
 const pending = new Map(); // item id -> { raw: changed input values, fields: what Save sends }; kept across re-renders
 
 const dueMs = (i) => (i.due ? new Date(i.due).getTime() : Infinity);
@@ -292,6 +302,9 @@ function row(item) {
       '', left(item), round2(item.weight), markText(item)]
       .map((t) => $('td', { textContent: String(t) })));
     tr.children[2].className = 'course';
+    if (/^https?:\/\//i.test(item.url ?? '')) tr.children[3].replaceChildren(
+      $('a', { href: item.url, target: '_blank', rel: 'noopener', textContent: item.title ?? '' }),
+      item.missing ? ' (missing from source)' : '');
     if (item.due) {
       const [date, time] = dueText(item.due);
       const dot = icon(DOT);
@@ -402,6 +415,8 @@ function render() {
   const visible = all.filter((c) => !hidden.includes(c));
   const courses = editing() ? all : visible; // edit mode lists hidden courses too, so they can be shown again
   if (!courses.includes(course)) course = '';
+  if (!TYPE_BUTTONS.includes(kind)) kind = '';
+  localStorage.setItem('filters', JSON.stringify({ course, kind, hideDone }));
   const addCourse = document.querySelector('#add [name=course]');
   const was = addCourse.value;
   addCourse.replaceChildren($('option', { value: '', textContent: 'Course' }),
@@ -484,11 +499,24 @@ function render() {
       }
       return tr;
     }));
+  const list = document.getElementById('list');
+  if (!list.children.length) {
+    const clear = $('button', { textContent: 'Clear filters', onclick: () => { course = ''; kind = ''; hideDone = false; render(); } });
+    list.append($('tr', {}, $('td', { className: 'empty', colSpan: cols.length }, 'No items match these filters.', clear)));
+  }
+  // Course grades under the list: every course shown in the course buttons (AC29)
+  document.querySelector('#grades tbody').replaceChildren(...courses.filter((c) => c !== '(no course)').map((c) => {
+    const g = data.courses[c] || { grade: null, graded_pct: 0 };
+    const tr = $('tr', {}, ...[c, g.grade == null ? '' : `${g.grade.toFixed(1)}%`,
+      `${(g.graded_pct || 0).toFixed(0)}%${g.approximate ? ' (approximate)' : ''}`].map((t) => $('td', { textContent: t })));
+    tr.style.setProperty('--c', colorOf(c));
+    return tr;
+  }));
   // Line the dots up: size every date slot to the widest date shown, measured with the slot unset
-  const list = document.getElementById('items');
-  list.style.removeProperty('--date-w');
-  const widths = [...list.querySelectorAll('.due span:first-child')].map((e) => e.getBoundingClientRect().width);
-  if (widths.length) list.style.setProperty('--date-w', `${Math.ceil(Math.max(...widths))}px`);
+  const table = document.getElementById('items');
+  table.style.removeProperty('--date-w');
+  const widths = [...table.querySelectorAll('.due span:first-child')].map((e) => e.getBoundingClientRect().width);
+  if (widths.length) table.style.setProperty('--date-w', `${Math.ceil(Math.max(...widths))}px`);
   pin();
 }
 
@@ -507,6 +535,7 @@ document.getElementById('edit').addEventListener('click', () => {
   render();
 });
 document.getElementById('save').addEventListener('click', saveAll);
+window.addEventListener('beforeunload', (e) => { if (pending.size) e.preventDefault(); }); // reload or close with unsaved edits
 document.querySelector('#add [name=kind]').append(...KINDS.map((k) => $('option', { value: k, textContent: k })));
 document.getElementById('add').addEventListener('submit', add);
 document.getElementById('cal-back').addEventListener('click', () => { calOffset -= days(); render(); });
