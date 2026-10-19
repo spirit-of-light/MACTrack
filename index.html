@@ -489,13 +489,19 @@ function render() {
       $('p', { className: 'course', textContent: courseOf(i) }),
       $('p', { className: 'title', textContent: i.title ?? '', title: i.title ?? '' }),
       $('p', { className: 'when', textContent: dueText(i.due).join(' • ') }),
-      $('p', { className: 'muted', textContent: [`in ${left(i)}`, i.weight != null && `worth ${round2(i.weight)}%`].filter(Boolean).join(', ') }),
+      $('p', { className: 'muted', textContent: [left(i) && (overdue(i) ? left(i) : `in ${left(i)}`),
+        i.weight != null && `worth ${round2(i.weight)}%`].filter(Boolean).join(', ') }),
       ...extra.filter(Boolean).map((t) => $('p', { className: 'muted', textContent: t })),
     ] : [$('p', { className: 'muted', textContent: empty })]));
   };
   const nextTest = ahead.find((i) => TESTS.includes(i.kind));
-  block('next-test', 'Next test', nextTest, 'No tests scheduled',
-    [nextTest && `Room ${roomOf(nextTest.title, data.courses[courseOf(nextTest)]?.info) ?? 'TBD'}`]);
+  // Hovering a row in the Tests table shows that test here as "Selected test"; leaving it goes back to the next one.
+  showTest = (picked) => {
+    const i = picked || nextTest;
+    block('next-test', picked ? 'Selected test' : 'Next test', i, 'No tests scheduled',
+      [i && `Room ${roomOf(i.title, data.courses[courseOf(i)]?.info) ?? 'TBD'}`]);
+  };
+  showTest(null);
 
   const g = data.courses[course] || { grade: null, graded_pct: 0 };
   const summary = document.getElementById('summary');
@@ -511,6 +517,10 @@ function render() {
     tr.item = i; // for tick()
     tr.style.setProperty('--c', colorOf(courseOf(i)));
     tr.classList.toggle('off', hidden.includes(courseOf(i)));
+    if (TESTS.includes(i.kind)) {
+      tr.addEventListener('mouseenter', () => showTest(i));
+      tr.addEventListener('mouseleave', () => showTest(null));
+    }
     if (i.due) { // local due date: calendar hover finds these rows, row hover finds its calendar day
       const day = localInput(i.due)[0];
       tr.dataset.day = day;
@@ -563,6 +573,7 @@ function render() {
 // Time left changes at whole hours of time remaining (whole minutes under a day). Refresh only those cells, and the
 // row's overdue/upcoming colour, exactly when the next one changes; nothing runs in between.
 let timed = []; // [row, item] for open items with a due date
+let showTest = () => {}; // set by render(): fills the Next test box with a given test, or the next one
 let tickTimer;
 function tick() {
   clearTimeout(tickTimer);
