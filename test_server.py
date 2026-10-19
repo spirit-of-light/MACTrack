@@ -1941,12 +1941,15 @@ def test_index_hide_courses():
 
 def test_index_single_list():
     html = (ROOT / "index.html").read_text()
-    for id_ in ("courses", "kinds"):
+    for id_ in ("courses", "kinds", "statuses"):
         assert re.search(rf"<div id=['\"]{id_}['\"] class=['\"]chips['\"]", html), f"no #{id_} button row"
-    assert re.search(r"\['', \.\.\.values\]\.map", html) and "v || 'All'" in html, "button rows do not start with All"
+    assert re.search(r"\['', \.\.\.values\]\.map", html) and "v ? label(v) : 'All'" in html, "button rows do not start with All"
     assert re.search(r"const keep = \(i\) => byStatus\(i\) && \(!kind \|\| i\.kind === kind\)", html), "Type filter not applied"
     head = re.search(r"\['Done', 'Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',", html)
     assert head, "list columns are not Done | Type | Course | Title | Due | Time left | Weight | Mark"
+    assert "upcoming }" not in html and "Upcoming'" not in html, "Upcoming still offered as a status"
+    assert html.index('id="calendar"') < html.index('id="courses"'), "calendar is not above the filters"
+    assert re.search(r'<nav id="cal-nav">(?:(?!</nav>).)*id="days"', html, re.S), "upcoming window not beside the calendar arrows"
     assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
     assert "round2(item.weight), markText(item)" in html and "round2(i.mark)" in html, "weight and mark not rounded in view mode"
 

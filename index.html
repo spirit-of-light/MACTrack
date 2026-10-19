@@ -36,7 +36,8 @@
   tr.missing { opacity: .55; }
   .src { color: var(--text-faint); font-size: .85em; }
   .info { color: var(--text-muted); margin: 0 0 .3rem; }
-  #cal-nav { display: flex; gap: .3rem; margin: 1rem 0 .4rem; }
+  #cal-nav { display: flex; align-items: center; gap: .3rem; margin: 1rem 0 .4rem; }
+  #cal-nav label { margin-left: .8rem; }
   /* 7 equal columns whatever N is; more days wrap to new rows; every row as tall as the tallest */
   #calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: 1fr;
     border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
@@ -52,14 +53,17 @@
 <h1>MacTracker</h1>
 <div id="banners"></div>
 <p id="sources"></p>
+<nav id="cal-nav">
+  <button id="cal-back" aria-label="Previous days">←</button>
+  <button id="cal-today">Today</button>
+  <button id="cal-fwd" aria-label="Next days">→</button>
+  <label>Upcoming window (days) <input id="days" type="number" min="1" style="width:4em"></label>
+</nav>
+<div id="calendar"></div>
 <div id="courses" class="chips" role="group" aria-label="Course"></div>
 <div id="kinds" class="chips" role="group" aria-label="Type"></div>
+<div id="statuses" class="chips" role="group" aria-label="Status"></div>
 <p>
-  <label>Status <select id="status">
-    <option value="">All</option><option value="open">Not done</option><option value="done">Done</option>
-    <option value="overdue">Overdue</option><option value="upcoming">Upcoming</option>
-  </select></label>
-  <label>Upcoming window (days) <input id="days" type="number" min="1" style="width:4em"></label>
   <label><input id="edit" type="checkbox"> Edit mode</label>
 </p>
 <form id="add">
@@ -74,12 +78,6 @@
   <input name="out_of" type="number" step="any" placeholder="Out of" style="width:5em">
   <button>Add</button>
 </form>
-<nav id="cal-nav">
-  <button id="cal-back" aria-label="Previous days">←</button>
-  <button id="cal-today">Today</button>
-  <button id="cal-fwd" aria-label="Next days">→</button>
-</nav>
-<div id="calendar"></div>
 <main>
   <p id="summary" class="info"></p>
   <table><thead id="head"></thead><tbody id="list"></tbody></table>
@@ -116,6 +114,8 @@ let status = {};
 let calOffset = 0; // calendar start, in days from today; not saved
 let course = ''; // course and type filters; '' is All; not saved
 let kind = '';
+let state = ''; // status filter
+const STATES = { open: 'Not done', done: 'Done', overdue: 'Overdue' };
 
 const dueMs = (i) => (i.due ? new Date(i.due).getTime() : Infinity);
 const overdue = (i) => !i.done && dueMs(i) < Date.now();
@@ -222,8 +222,8 @@ function row(item) {
 }
 
 // A row of toggle buttons, All first; the pressed one is the current filter.
-const chips = (values, current, pick) => ['', ...values].map((v) => {
-  const b = $('button', { textContent: v || 'All', onclick: () => { pick(v); render(); } });
+const chips = (values, current, pick, label = (v) => v) => ['', ...values].map((v) => {
+  const b = $('button', { textContent: v ? label(v) : 'All', onclick: () => { pick(v); render(); } });
   b.setAttribute('aria-pressed', String(v === current));
   return b;
 });
@@ -287,8 +287,8 @@ function render() {
   }));
   document.getElementById('kinds').replaceChildren(...chips(KINDS, kind, (v) => { kind = v; }));
 
-  const want = document.getElementById('status').value;
-  const byStatus = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue, upcoming }[want];
+  document.getElementById('statuses').replaceChildren(...chips(Object.keys(STATES), state, (v) => { state = v; }, (v) => STATES[v]));
+  const byStatus = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue }[state];
   const keep = (i) => byStatus(i) && (!kind || i.kind === kind);
   const picked = (c) => !course || c === course;
   const cal = document.getElementById('calendar');
@@ -321,7 +321,6 @@ editBox.checked = editing();
 editBox.addEventListener('change', () => { localStorage.setItem('editMode', editBox.checked ? '1' : '0'); render(); });
 document.querySelector('#add [name=kind]').append(...KINDS.map((k) => $('option', { value: k, textContent: k })));
 document.getElementById('add').addEventListener('submit', add);
-document.getElementById('status').addEventListener('change', render);
 document.getElementById('cal-back').addEventListener('click', () => { calOffset -= days(); render(); });
 document.getElementById('cal-fwd').addEventListener('click', () => { calOffset += days(); render(); });
 document.getElementById('cal-today').addEventListener('click', () => { calOffset = 0; render(); });
