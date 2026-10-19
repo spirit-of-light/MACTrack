@@ -35,15 +35,15 @@
   #sources, #grades { margin-top: 2rem; width: auto; }
   #sources { color: var(--text-muted); }
   #grades td:first-child { color: var(--c); font-weight: 600; }
-  #items tbody td.empty { padding: 1rem .3rem; text-align: left; color: var(--text-muted); } /* beats the ✓ column centring */
-  #items td.empty button { margin-left: .6rem; }
+  .items tbody td.empty { padding: 1rem .3rem; text-align: left; color: var(--text-muted); } /* beats the ✓ column centring */
+  .items td.empty button { margin-left: .6rem; }
   /* Item list with the filter sidebar on its right; the sidebar stays in view while the list scrolls */
   #layout { display: grid; grid-template-columns: minmax(0, 1fr) 9rem; gap: 1.5rem; align-items: start; }
   /* Calendar and sidebar both stay in view while the list scrolls under the calendar */
   #layout.editing { grid-template-columns: minmax(0, 1fr) 15rem; } /* room for the Add item form */
   #cal-wrap { background: var(--bg); padding-bottom: .4rem; }
   #cal-wrap { position: sticky; top: 0; z-index: 2; } /* the 14-day calendar always stays in view */
-  #items thead th { position: sticky; top: var(--head-top, 0); z-index: 1; background: var(--bg); } /* column titles stay below the calendar */
+  .items thead th { position: sticky; top: var(--head-top, 0); z-index: 1; background: var(--bg); } /* column titles stay below the calendar */
   #filters { position: sticky; top: var(--head-top, 0); max-height: calc(100vh - var(--head-top, 0px)); overflow-y: auto; box-sizing: border-box; padding-top: 1rem;
     display: flex; flex-direction: column; gap: 1rem; }
   .chips { display: grid; grid-template-columns: 1fr; gap: .3rem; } /* one vertical column per filter group */
@@ -61,9 +61,11 @@
   td input, td select { width: 100%; box-sizing: border-box; font: inherit; min-width: 0; } /* stay inside fixed columns */
   td input[type=checkbox] { width: auto; margin: 0; }
   /* Item list: fixed column widths so filtering never shifts columns; Title takes the rest */
-  #items { table-layout: fixed; border-collapse: separate; border-spacing: 0; } /* separate borders: sticky titles paint cleanly in Firefox */
-  #items td { overflow-wrap: anywhere; }
-  #items th:first-child, #items td:first-child { padding: 0 2px; text-align: center; }
+  .items { table-layout: fixed; border-collapse: separate; border-spacing: 0; } /* separate borders: sticky titles paint cleanly in Firefox */
+  .items td { overflow-wrap: anywhere; }
+  .list-h { font-size: 1rem; margin: 1.2rem 0 .3rem; color: var(--primary); }
+  .list-h:first-of-type { margin-top: .4rem; }
+  .items th:first-child, .items td:first-child { padding: 0 2px; text-align: center; }
   col.done { width: var(--tick, 1.2em); } /* checkmark width + 4px, measured at load */
   col.type { width: 6.5rem; } col.course { width: 8rem; } col.due { width: 9.5rem; } col.left { width: 7.5rem; }
   col.weight { width: 4.5rem; } col.mark { width: 6rem; } col.actions { width: 22px; } /* 18px trash icon + 4px */
@@ -126,7 +128,14 @@
 <div id="layout">
 <main>
   <p id="summary" class="info"></p>
-  <table id="items"><colgroup id="cols"></colgroup><thead id="head"></thead><tbody id="list"></tbody></table>
+  <div id="tests-part">
+    <h2 class="list-h">Tests</h2>
+    <table id="tests" class="items"><colgroup></colgroup><thead></thead><tbody></tbody></table>
+  </div>
+  <div id="work-part">
+    <h2 class="list-h">Coursework</h2>
+    <table id="items" class="items"><colgroup></colgroup><thead></thead><tbody id="list"></tbody></table>
+  </div>
   <table id="grades">
     <thead><tr><th>Course</th><th>Grade</th><th>Graded</th></tr></thead>
     <tbody></tbody>
@@ -383,7 +392,7 @@ function calendar(items, colorOf) {
     to.setDate(from.getDate() + 1);
     const today = calOffset + k === 0;
     const day = localInput(from.toISOString())[0];
-    const hl = (on) => document.querySelectorAll(`#list tr[data-day="${day}"]`).forEach((tr) => tr.classList.toggle('hl', on));
+    const hl = (on) => document.querySelectorAll(`.items tbody tr[data-day="${day}"]`).forEach((tr) => tr.classList.toggle('hl', on));
     const label = from.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     const weekend = from.getDay() === 0 || from.getDay() === 6;
     const cell = $('div', { className: ['day', ...(today ? ['today'] : []), ...(weekend ? ['weekend'] : [])].join(' '), onmouseenter: () => hl(true), onmouseleave: () => hl(false) },
@@ -479,34 +488,40 @@ function render() {
     ...(g.approximate ? ['approximate'] : []), ...(g.info || []).map((i) => `${i.name}: ${i.value}`)].join(' | '); // AC29/AC91
 
   const cols = ['done', 'type', 'course', 'title', 'due', 'left', 'weight', 'mark', ...(editing() ? ['actions'] : [])];
-  document.getElementById('items').classList.toggle('editing', editing());
   document.getElementById('layout').classList.toggle('editing', editing());
-  document.getElementById('cols').replaceChildren(...cols.map((c) => $('col', { className: c })));
-  const done = $('th', { textContent: '✓', title: 'Done' });
-  done.setAttribute('aria-label', 'Done');
-  document.getElementById('head').replaceChildren($('tr', {}, done, ...['Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',
-    ...(editing() ? [''] : [])].map((h) => $('th', { textContent: h }))));
-  document.getElementById('list').replaceChildren(...data.items
-    .filter((i) => courses.includes(courseOf(i)) && picked(courseOf(i)) && keep(i))
-    .sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b)) // not done first, then by due date
-    .map((i) => {
-      const tr = row(i);
-      tr.item = i; // for tick()
-      tr.style.setProperty('--c', colorOf(courseOf(i)));
-      tr.classList.toggle('off', hidden.includes(courseOf(i)));
-      if (i.due) { // local due date: calendar hover finds these rows, row hover finds its calendar day
-        const day = localInput(i.due)[0];
-        tr.dataset.day = day;
-        const hl = (on) => document.querySelector(`#calendar .day[data-day="${day}"]`)?.classList.toggle('hl', on);
-        tr.addEventListener('mouseenter', () => hl(true));
-        tr.addEventListener('mouseleave', () => hl(false));
-      }
-      return tr;
-    }));
-  const list = document.getElementById('list');
-  if (!list.children.length) {
+  const done = () => { const th = $('th', { textContent: '✓', title: 'Done' }); th.setAttribute('aria-label', 'Done'); return th; };
+  const toRow = (i) => {
+    const tr = row(i);
+    tr.item = i; // for tick()
+    tr.style.setProperty('--c', colorOf(courseOf(i)));
+    tr.classList.toggle('off', hidden.includes(courseOf(i)));
+    if (i.due) { // local due date: calendar hover finds these rows, row hover finds its calendar day
+      const day = localInput(i.due)[0];
+      tr.dataset.day = day;
+      const hl = (on) => document.querySelector(`#calendar .day[data-day="${day}"]`)?.classList.toggle('hl', on);
+      tr.addEventListener('mouseenter', () => hl(true));
+      tr.addEventListener('mouseleave', () => hl(false));
+    }
+    return tr;
+  };
+  const shown = data.items.filter((i) => courses.includes(courseOf(i)) && picked(courseOf(i)) && keep(i))
+    .sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b)); // not done first, then by due date
+  // Tests (test, exam, midterm) get their own table above the coursework; same columns so they line up
+  const parts = [['tests', shown.filter((i) => TESTS.includes(i.kind))], ['items', shown.filter((i) => !TESTS.includes(i.kind))]];
+  for (const [id, items] of parts) {
+    const table = document.getElementById(id);
+    table.classList.toggle('editing', editing());
+    table.querySelector('colgroup').replaceChildren(...cols.map((c) => $('col', { className: c })));
+    table.querySelector('thead').replaceChildren($('tr', {}, done(), ...['Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',
+      ...(editing() ? [''] : [])].map((h) => $('th', { textContent: h }))));
+    table.tBodies[0].replaceChildren(...items.map(toRow));
+  }
+  // An empty part is hidden; with nothing at all, the coursework part says so
+  document.getElementById('tests-part').hidden = !parts[0][1].length;
+  document.getElementById('work-part').hidden = !parts[1][1].length && !!shown.length;
+  if (!shown.length) {
     const clear = $('button', { textContent: 'Clear filters', onclick: () => { course = ''; kind = ''; hideDone = false; render(); } });
-    list.append($('tr', {}, $('td', { className: 'empty', colSpan: cols.length }, 'No items match these filters.', clear)));
+    document.getElementById('list').append($('tr', {}, $('td', { className: 'empty', colSpan: cols.length }, 'No items match these filters.', clear)));
   }
   // Course grades under the list: every course shown in the course buttons (AC29)
   document.querySelector('#grades tbody').replaceChildren(...courses.filter((c) => c !== '(no course)').map((c) => {
@@ -516,9 +531,9 @@ function render() {
     tr.style.setProperty('--c', colorOf(c));
     return tr;
   }));
-  timed = [...document.querySelectorAll('#list tr')].map((tr) => [tr, tr.item]).filter(([, i]) => i && i.due && !i.done);
+  timed = [...document.querySelectorAll('.items tbody tr')].map((tr) => [tr, tr.item]).filter(([, i]) => i && i.due && !i.done);
   tick();
-  alignDots(document.getElementById('items'));
+  alignDots(document.querySelector('main')); // both item tables share one date width, so their dots line up too
   alignDots(document.getElementById('sources'));
   pin();
 }

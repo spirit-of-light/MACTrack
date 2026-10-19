@@ -1967,7 +1967,7 @@ def test_index_single_list():
     assert ".next { height: calc((2 * var(--day) + 1px - .6rem) / 2);" in html, "Next boxes are not a fixed size"
     assert "dateTime(s.synced_at)" in html and "alignDots(document.getElementById('sources'))" in html, \
         "Last synced is not in the due-date style"
-    assert re.search(r"#items thead th \{ position: sticky; top: var\(--head-top", html), "column titles do not follow scrolling"
+    assert re.search(r"\.items thead th \{ position: sticky; top: var\(--head-top", html), "column titles do not follow scrolling"
     assert 'id="windows"' not in html and "upcomingDays" not in html, "window buttons are back"
     top = re.search(r'<div id="top">(.*?)<div id="layout">', html, re.S)[1]
     assert top.index('id="calendar"') < top.index('id="cal-nav"') < top.index('id="next-col"'), "arrows are not right of the calendar"
@@ -1982,7 +1982,10 @@ def test_index_single_list():
         "exam, midterm or homework still have type buttons"
     assert "const kindOf = (i) => (i.kind === 'exam' ? 'test' : i.kind);" in html, "exams are not shown as tests"
     assert re.search(r"const KINDS = \[[^\]]*'midterm'[^\]]*'homework'", html), "midterm or homework dropped from KINDS"
-    assert "#items { table-layout: fixed;" in html, "item list columns not locked"
+    assert ".items { table-layout: fixed;" in html, "item list columns not locked"
+    assert html.index('id="tests"') < html.index('id="items"'), "tests table is not above the coursework table"
+    assert "['tests', shown.filter((i) => TESTS.includes(i.kind))], ['items', shown.filter((i) => !TESTS.includes(i.kind))]" in html, \
+        "tests are not split into their own table"
     assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
     assert "round2(item.weight), markText(item)" in html and "round2(i.mark)" in html, "weight and mark not rounded in view mode"
 
