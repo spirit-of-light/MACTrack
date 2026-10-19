@@ -1999,7 +1999,9 @@ def test_index_single_save():
     assert re.search(r'<aside id="filters">.*?<form id="add">.*?</aside>', html, re.S), "add-item form is not in the sidebar"
     assert re.search(r'<select name="course" required', html), "add-item course is not a select"
     assert "appearance: textfield" in html, "number inputs still show increment buttons"
-    assert "#layout.editing" not in html, "edit mode has its own layout"
+    assert "#layout.editing #filters" not in html, "edit mode moves the filters out of the sidebar"
+    assert ".chips button.course { border-left: 4px solid var(--c); }" in html and "var(--c, var(--text-faint))" not in html, \
+        "grey edge on non-course buttons"
     assert "#add[hidden] { display: none; }" in html, "add form's display rule overrides hidden in view mode"
 
 

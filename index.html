@@ -34,8 +34,9 @@
   .banner { background: var(--banner-bg); border: 1px solid var(--banner-border); padding: .4rem .6rem; margin: .3rem 0; }
   #sources { margin-top: 2rem; width: auto; color: var(--text-muted); }
   /* Item list with the filter sidebar on its right; the sidebar stays in view while the list scrolls */
-  #layout { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; gap: 1.5rem; align-items: start; }
+  #layout { display: grid; grid-template-columns: minmax(0, 1fr) 9rem; gap: 1.5rem; align-items: start; }
   /* Calendar and sidebar both stay in view while the list scrolls under the calendar */
+  #layout.editing { grid-template-columns: minmax(0, 1fr) 15rem; } /* room for the Add item form */
   #cal-wrap { background: var(--bg); padding-bottom: .4rem; }
   #cal-wrap.pinned { position: sticky; top: 0; z-index: 2; } /* only while N <= 14 */
   #items thead th { position: sticky; top: var(--head-top, 0); z-index: 1; background: var(--bg); } /* column titles stay below the calendar */
@@ -45,8 +46,8 @@
   @media (max-width: 900px) { #layout { grid-template-columns: 1fr; } #filters { position: static; order: -1; max-height: none; } }
   .chips > span { display: flex; }
   .chips > span > button:first-child { flex: 1; }
-  .chips button, #windows button { background: var(--bg); color: var(--text); border: 1px solid var(--text-faint);
-    border-left: 4px solid var(--c, var(--text-faint)); }
+  .chips button, #windows button { background: var(--bg); color: var(--text); border: 1px solid var(--text-faint); }
+  .chips button.course { border-left: 4px solid var(--c); } /* colour edge only on course buttons */
   .chips button:hover, #windows button:hover { background: var(--primary-tint); }
   .chips button[aria-pressed=true], #windows button[aria-pressed=true] { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
   .chips .off { opacity: .5; }
@@ -384,6 +385,7 @@ function render() {
     if (!n) return b;
     const c = courses[n - 1];
     b.style.setProperty('--c', colorOf(c));
+    b.classList.add('course');
     if (!editing()) return b;
     const off = hidden.includes(c);
     const eye = $('button', { className: 'eye', title: off ? `Show ${c}` : `Hide ${c}`,
@@ -411,6 +413,7 @@ function render() {
 
   const cols = ['done', 'type', 'course', 'title', 'due', 'left', 'weight', 'mark', ...(editing() ? ['actions'] : [])];
   document.getElementById('items').classList.toggle('editing', editing());
+  document.getElementById('layout').classList.toggle('editing', editing());
   document.getElementById('cols').replaceChildren(...cols.map((c) => $('col', { className: c })));
   const done = $('th', { textContent: '✓', title: 'Done' });
   done.setAttribute('aria-label', 'Done');
