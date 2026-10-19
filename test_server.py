@@ -1968,13 +1968,14 @@ def test_index_single_list():
         "page top margin makes the top bar jump when it pins"
     assert "grid-template-columns: repeat(7, var(--day)); grid-auto-rows: var(--day);" in html and "--day: 8.5rem;" in html, \
         "calendar days are not fixed squares"
-    assert ".next { height: calc((2 * var(--day) + 1px - .6rem) / 2);" in html, "Next boxes are not a fixed size"
+    assert ".next { height: calc(2 * var(--day) + 1px);" in html and "#next-test { flex: 1;" in html, \
+        "Next test box does not fill the rest of the top bar at the calendar's height"
     assert "dateTime(s.synced_at)" in html and "alignDots(document.getElementById('sources'))" in html, \
         "Last synced is not in the due-date style"
     assert re.search(r"\.items thead th \{ position: sticky; top: var\(--head-top", html), "column titles do not follow scrolling"
     assert 'id="windows"' not in html and "upcomingDays" not in html, "window buttons are back"
     top = re.search(r'<div id="top">(.*?)<div id="layout">', html, re.S)[1]
-    assert top.index('id="calendar"') < top.index('id="cal-nav"') < top.index('id="next-col"'), "arrows are not right of the calendar"
+    assert top.index('id="calendar"') < top.index('id="cal-nav"') < top.index('id="next-test"'), "arrows are not right of the calendar"
     assert re.search(r'id="cal-back".*?id="cal-today".*?id="cal-fwd"', top, re.S) and "flex-direction: column; gap: .3rem; } /* up:" in html, \
         "arrows are not up / today / down in a column"
     assert "from.getDay() === 0 || from.getDay() === 6" in html and ".day.weekend { background: var(--weekend-bg); }" in html, \
@@ -2031,11 +2032,11 @@ def test_index_single_save():
 def test_index_next_blocks_and_row_hover():
     html = (ROOT / "index.html").read_text()
     top = re.search(r'<div id="top">(.*?)<div id="layout">', html, re.S)[1]
-    assert top.index('id="calendar"') < top.index('id="next-col"') < top.index('id="next-up"') < top.index('id="next-test"'), \
-        "top bar is not the calendar, then Next up over Next test"
-    assert "#next-col {" in html and "flex-direction: column" in html, "Next blocks are not stacked"
-    assert "ahead.find((i) => !TESTS.includes(i.kind))" in html and "ahead.find((i) => TESTS.includes(i.kind))" in html, \
-        "Next up / Next test pick the wrong items"
+    assert top.index('id="calendar"') < top.index('id="next-test"') and 'id="next-up"' not in html, \
+        "top bar is not the calendar then Next test, or Next up is back"
+    assert "ahead.find((i) => TESTS.includes(i.kind))" in html, "Next test picks the wrong item"
+    assert "?? 'TBD'}`" in html, "a test with no known room does not say TBD"
+    assert "id === 'tests' && h === 'Due' ? 'Time' : h" in html, "tests table still says Due"
     assert "querySelector(`#calendar .day[data-day=\"${day}\"]`)" in html and "cell.dataset.day = day;" in html, \
         "row hover does not highlight its calendar day"
     js = re.search(r"^const roomOf = .*?^\};$", html, re.M | re.S)[0] + """

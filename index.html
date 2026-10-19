@@ -100,12 +100,12 @@
   .day.today h3 { color: var(--primary); }
   .day.weekend { background: var(--weekend-bg); }
   .day.hl { background: var(--primary-tint); box-shadow: inset 0 0 0 2px var(--primary); } /* hovered row's due day */
-  /* Top bar: the calendar column, then Next up and Next test stacked on its right */
+  /* Top bar: the calendar, its arrows, then the Next test box filling the rest */
   #top { display: flex; gap: .8rem; align-items: flex-start; padding-top: 1rem; } /* Next blocks keep their own height */
   #cal-col { flex: none; }
-  #next-col { flex: 0 0 11rem; display: flex; flex-direction: column; gap: .6rem; }
+  #next-test { flex: 1; min-width: 0; } /* fills the rest of the top bar */
   /* Fixed boxes: 11rem wide, together as tall as the two calendar rows; long titles end in an ellipsis */
-  .next { height: calc((2 * var(--day) + 1px - .6rem) / 2); box-sizing: border-box; overflow: hidden; padding: .4rem .6rem;
+  .next { height: calc(2 * var(--day) + 1px); box-sizing: border-box; overflow: hidden; padding: .4rem .6rem;
     border: 1px solid var(--border); border-left: 4px solid var(--c, var(--border)); }
   .next p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .next h3 { font-size: .9rem; margin: 0 0 .3rem; color: var(--primary); }
@@ -127,10 +127,7 @@
       <button id="cal-today" aria-label="Back to today" title="Back to today"></button>
       <button id="cal-fwd" aria-label="Next week" title="Next week"></button>
     </nav>
-    <div id="next-col">
-      <div id="next-up" class="next" role="region" aria-label="Next up"></div>
-      <div id="next-test" class="next" role="region" aria-label="Next test"></div>
-    </div>
+    <div id="next-test" class="next" role="region" aria-label="Next test"></div>
   </div>
 </div>
 <div id="layout">
@@ -478,7 +475,7 @@ function render() {
   const cal = document.getElementById('calendar');
   cal.replaceChildren(...calendar(data.items.filter((i) => visible.includes(courseOf(i)) && picked(courseOf(i)) && keep(i)), colorOf));
 
-  // Next up: soonest not-done item still ahead, tests excluded; Next test: soonest test. Hidden courses and the course filter apply.
+  // Next test: the soonest test, exam or midterm still ahead. Hidden courses and the course filter apply.
   const ahead = data.items.filter((i) => shownKind(i) && !i.done && i.due && dueMs(i) >= Date.now() && visible.includes(courseOf(i))
     && picked(courseOf(i))).sort((a, b) => dueMs(a) - dueMs(b));
   const block = (id, heading, i, empty, extra = []) => {
@@ -492,12 +489,9 @@ function render() {
       ...extra.filter(Boolean).map((t) => $('p', { className: 'muted', textContent: t })),
     ] : [$('p', { className: 'muted', textContent: empty })]));
   };
-  const nextUp = ahead.find((i) => !TESTS.includes(i.kind));
   const nextTest = ahead.find((i) => TESTS.includes(i.kind));
-  block('next-up', 'Next up', nextUp, 'Nothing due');
-  block('next-test', 'Next test', nextTest, 'No tests scheduled', [
-    nextTest && roomOf(nextTest.title, data.courses[courseOf(nextTest)]?.info) && `Room ${roomOf(nextTest.title, data.courses[courseOf(nextTest)]?.info)}`,
-  ]);
+  block('next-test', 'Next test', nextTest, 'No tests scheduled',
+    [nextTest && `Room ${roomOf(nextTest.title, data.courses[courseOf(nextTest)]?.info) ?? 'TBD'}`]);
 
   const g = data.courses[course] || { grade: null, graded_pct: 0 };
   const summary = document.getElementById('summary');
@@ -535,7 +529,8 @@ function render() {
     table.classList.toggle('editing', editing());
     table.querySelector('colgroup').replaceChildren(...cols.filter((c) => typed || c !== 'type').map((c) => $('col', { className: c })));
     table.querySelector('thead').replaceChildren($('tr', {}, done(), ...['Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',
-      ...(editing() ? [''] : [])].filter((h) => typed || h !== 'Type').map((h) => $('th', { textContent: h }))));
+      ...(editing() ? [''] : [])].filter((h) => typed || h !== 'Type')
+      .map((h) => $('th', { textContent: id === 'tests' && h === 'Due' ? 'Time' : h })))); // a test is held, not handed in
     table.tBodies[0].replaceChildren(...items.map(toRow).map((tr) => { if (!typed) tr.children[1].remove(); return tr; }));
   }
   // An empty part is hidden; with nothing at all, the coursework part says so
