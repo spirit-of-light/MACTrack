@@ -1950,6 +1950,7 @@ def test_index_single_list():
     assert "upcoming }" not in html and "Upcoming'" not in html, "Upcoming still offered as a status"
     assert html.index('id="calendar"') < html.index('id="courses"'), "calendar is not above the filters"
     assert re.search(r'<nav id="cal-nav">(?:(?!</nav>).)*id="days"', html, re.S), "upcoming window not beside the calendar arrows"
+    assert ".sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b))" in html, "done items not listed after open ones"
     assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
     assert "round2(item.weight), markText(item)" in html and "round2(i.mark)" in html, "weight and mark not rounded in view mode"
 

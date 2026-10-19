@@ -304,7 +304,7 @@ function render() {
     ...(editing() ? ['Source', ''] : [])].map((h) => $('th', { textContent: h }))));
   document.getElementById('list').replaceChildren(...data.items
     .filter((i) => courses.includes(courseOf(i)) && picked(courseOf(i)) && keep(i))
-    .sort((a, b) => dueMs(a) - dueMs(b))
+    .sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b)) // not done first, then by due date
     .map((i) => {
       const tr = row(i);
       tr.style.setProperty('--c', colorOf(courseOf(i)));
