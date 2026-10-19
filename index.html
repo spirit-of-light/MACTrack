@@ -107,11 +107,15 @@
   /* Fixed boxes: 11rem wide, together as tall as the two calendar rows; long titles end in an ellipsis */
   .next { height: calc(2 * var(--day) + 1px); box-sizing: border-box; overflow: hidden; padding: .4rem .6rem;
     border: 1px solid var(--border); border-left: 4px solid var(--c, var(--border)); }
-  .next p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .next h3 { font-size: .9rem; margin: 0 0 .3rem; color: var(--primary); }
-  .next p { margin: 0 0 .15rem; }
-  .next .course { color: var(--c); font-weight: 600; }
-  .next .muted { color: var(--text-muted); }
+  /* Text scales with the box width (cqw), capped; title near the top, date and details pushed to the bottom */
+  .next { display: flex; flex-direction: column; container-type: inline-size; }
+  .next p { margin: 0 0 .2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .next h3 { font-size: .9rem; margin: 0 0 .4rem; color: var(--primary); }
+  .next .course { color: var(--c); font-weight: 600; font-size: clamp(1rem, 8cqw, 1.4rem); }
+  .next .title { font-size: clamp(1.5rem, 14cqw, 2.6rem); font-weight: 700; line-height: 1.15; white-space: normal;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .next .when { margin-top: auto; font-size: clamp(1.2rem, 11cqw, 2rem); font-weight: 600; }
+  .next .muted { color: var(--text-muted); font-size: clamp(.95rem, 7cqw, 1.3rem); }
   .day p { margin: 0 0 .3rem; border-left: 4px solid var(--c); padding-left: .3rem; font-size: .9em; }
   .chips button.eye, .chips button.eye:hover { background: none; color: var(--c); border: 0; padding: 0 .2rem; vertical-align: middle; }
   tr.off { opacity: .5; }
@@ -483,8 +487,8 @@ function render() {
     el.style.setProperty('--c', i ? colorOf(courseOf(i)) : '');
     el.replaceChildren($('h3', { textContent: heading }), ...(i ? [
       $('p', { className: 'course', textContent: courseOf(i) }),
-      $('p', { textContent: i.title ?? '', title: i.title ?? '' }),
-      $('p', { textContent: dueText(i.due).join(' • ') }),
+      $('p', { className: 'title', textContent: i.title ?? '', title: i.title ?? '' }),
+      $('p', { className: 'when', textContent: dueText(i.due).join(' • ') }),
       $('p', { className: 'muted', textContent: [`in ${left(i)}`, i.weight != null && `worth ${round2(i.weight)}%`].filter(Boolean).join(', ') }),
       ...extra.filter(Boolean).map((t) => $('p', { className: 'muted', textContent: t })),
     ] : [$('p', { className: 'muted', textContent: empty })]));

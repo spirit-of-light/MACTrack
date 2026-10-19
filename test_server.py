@@ -2036,6 +2036,7 @@ def test_index_next_blocks_and_row_hover():
         "top bar is not the calendar then Next test, or Next up is back"
     assert "ahead.find((i) => TESTS.includes(i.kind))" in html, "Next test picks the wrong item"
     assert "?? 'TBD'}`" in html, "a test with no known room does not say TBD"
+    assert "container-type: inline-size;" in html and ".next .title { font-size: clamp(" in html, "Next test text does not scale with its box"
     assert "id === 'tests' && h === 'Due' ? 'Time' : h" in html, "tests table still says Due"
     assert "querySelector(`#calendar .day[data-day=\"${day}\"]`)" in html and "cell.dataset.day = day;" in html, \
         "row hover does not highlight its calendar day"
