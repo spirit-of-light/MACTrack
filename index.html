@@ -132,6 +132,10 @@
     <h2 class="list-h">Tests</h2>
     <table id="tests" class="items"><colgroup></colgroup><thead></thead><tbody></tbody></table>
   </div>
+  <div id="labs-part">
+    <h2 class="list-h">Labs</h2>
+    <table id="labs" class="items"><colgroup></colgroup><thead></thead><tbody></tbody></table>
+  </div>
   <div id="work-part">
     <h2 class="list-h">Coursework</h2>
     <table id="items" class="items"><colgroup></colgroup><thead></thead><tbody id="list"></tbody></table>
@@ -507,10 +511,13 @@ function render() {
   };
   const shown = data.items.filter((i) => courses.includes(courseOf(i)) && picked(courseOf(i)) && keep(i))
     .sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b)); // not done first, then by due date
-  // Tests (test, exam, midterm) get their own table above the coursework; same columns so they line up
-  const parts = [['tests', shown.filter((i) => TESTS.includes(i.kind))], ['items', shown.filter((i) => !TESTS.includes(i.kind))]];
+  // Tests (test, exam, midterm) and labs get their own tables above the coursework. Each is one type, so it has no
+  // Type column; the rest of the columns match, so they line up.
+  const isLab = (i) => i.kind === 'lab';
+  const parts = [['tests', shown.filter((i) => TESTS.includes(i.kind))], ['labs', shown.filter(isLab)],
+    ['items', shown.filter((i) => !TESTS.includes(i.kind) && !isLab(i))]];
   for (const [id, items] of parts) {
-    const typed = id !== 'tests'; // every test is a test, so the tests table has no Type column
+    const typed = id === 'items';
     const table = document.getElementById(id);
     table.classList.toggle('editing', editing());
     table.querySelector('colgroup').replaceChildren(...cols.filter((c) => typed || c !== 'type').map((c) => $('col', { className: c })));
@@ -520,7 +527,8 @@ function render() {
   }
   // An empty part is hidden; with nothing at all, the coursework part says so
   document.getElementById('tests-part').hidden = !parts[0][1].length;
-  document.getElementById('work-part').hidden = !parts[1][1].length && !!shown.length;
+  document.getElementById('labs-part').hidden = !parts[1][1].length;
+  document.getElementById('work-part').hidden = !parts[2][1].length && !!shown.length;
   if (!shown.length) {
     const clear = $('button', { textContent: 'Clear filters', onclick: () => { course = ''; kind = ''; hideDone = false; render(); } });
     document.getElementById('list').append($('tr', {}, $('td', { className: 'empty', colSpan: cols.length }, 'No items match these filters.', clear)));

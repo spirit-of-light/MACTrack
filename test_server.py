@@ -1983,10 +1983,11 @@ def test_index_single_list():
     assert "const kindOf = (i) => (i.kind === 'exam' ? 'test' : i.kind);" in html, "exams are not shown as tests"
     assert re.search(r"const KINDS = \[[^\]]*'midterm'[^\]]*'homework'", html), "midterm or homework dropped from KINDS"
     assert ".items { table-layout: fixed;" in html, "item list columns not locked"
-    assert html.index('id="tests"') < html.index('id="items"'), "tests table is not above the coursework table"
-    assert "['tests', shown.filter((i) => TESTS.includes(i.kind))], ['items', shown.filter((i) => !TESTS.includes(i.kind))]" in html, \
-        "tests are not split into their own table"
-    assert "const typed = id !== 'tests';" in html and "if (!typed) tr.children[1].remove();" in html, "tests table still has a Type column"
+    assert html.index('id="tests"') < html.index('id="labs"') < html.index('id="items"'), "tables are not Tests, Labs, Coursework"
+    assert "['tests', shown.filter((i) => TESTS.includes(i.kind))], ['labs', shown.filter(isLab)]" in html \
+        and "['items', shown.filter((i) => !TESTS.includes(i.kind) && !isLab(i))]" in html, "tests and labs are not split out"
+    assert "const typed = id === 'items';" in html and "if (!typed) tr.children[1].remove();" in html, \
+        "tests or labs table still has a Type column"
     assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
     assert "round2(item.weight), markText(item)" in html and "round2(i.mark)" in html, "weight and mark not rounded in view mode"
 
