@@ -1946,7 +1946,7 @@ def test_index_single_list():
         assert re.search(rf"<div id=['\"]{id_}['\"] class=['\"]chips['\"]", html), f"no #{id_} button row"
     assert re.search(r"\['', \.\.\.values\]\.map", html) and "v ? label(v) : 'All'" in html, "button rows do not start with All"
     assert re.search(r"const keep = \(i\) => byStatus\(i\) && \(!kind \|\| i\.kind === kind\)", html), "Type filter not applied"
-    head = re.search(r"\['Done', 'Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',", html)
+    head = re.search(r"textContent: '✓', title: 'Done'.*?\['Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',", html, re.S)
     assert head, "list columns are not Done | Type | Course | Title | Due | Time left | Weight | Mark"
     assert "upcoming }" not in html and "Upcoming'" not in html, "Upcoming still offered as a status"
     assert html.index('id="calendar"') < html.index('id="courses"'), "calendar is not above the filters"
@@ -1957,8 +1957,22 @@ def test_index_single_list():
     assert "TYPE_BUTTONS, kind" in html and re.search(r"TYPE_BUTTONS = KINDS\.filter\(\(k\) => k !== 'midterm' && k !== 'homework'\)", html), \
         "midterm and homework still have type buttons"
     assert re.search(r"const KINDS = \[[^\]]*'midterm'[^\]]*'homework'", html), "midterm or homework dropped from KINDS"
+    assert "#items { table-layout: fixed; }" in html, "item list columns not locked"
     assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
     assert "round2(item.weight), markText(item)" in html and "round2(i.mark)" in html, "weight and mark not rounded in view mode"
+
+
+def test_index_due_format():
+    html = (ROOT / "index.html").read_text()
+    js = "\n".join(re.search(rf"^const {n} = .*?;$", html, re.M)[0] for n in ("MONTHS", "pad"))
+    js += "\n" + re.search(r"^const dueText = .*?^\};$", html, re.M | re.S)[0]
+    js += """
+const now = new Date(2026, 9, 18);
+const out = [dueText(null, now), dueText(new Date(2026, 9, 20, 9, 5).toISOString(), now),
+  dueText(new Date(2027, 0, 3, 23, 59).toISOString(), now)];
+console.log(JSON.stringify(out));"""
+    got = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
+    assert got == ["", "20 Oct | 09:05", "03 Jan 2027 | 23:59"], got
 
 
 if __name__ == "__main__":

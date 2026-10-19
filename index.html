@@ -36,7 +36,16 @@
   th, td { text-align: left; padding: .15rem .3rem; border-bottom: 1px solid var(--border); }
   td input { width: 100%; box-sizing: border-box; font: inherit; }
   td input[type=number] { width: 5em; }
-  td input[type=checkbox] { width: auto; }
+  td input[type=checkbox] { width: auto; margin: 0; }
+  /* Item list: fixed column widths so filtering never shifts columns; Title takes the rest */
+  #items { table-layout: fixed; }
+  #items td { overflow-wrap: anywhere; }
+  #items th:first-child, #items td:first-child { padding: 0 2px; text-align: center; }
+  col.done { width: var(--tick, 1.2em); } /* checkmark width + 4px, measured at load */
+  col.type { width: 6.5rem; } col.course { width: 8rem; } col.due { width: 9.5rem; } col.left { width: 7.5rem; }
+  col.weight { width: 4.5rem; } col.mark { width: 6rem; } col.source { width: 6.5rem; } col.actions { width: 8.5rem; }
+  .editing col.done { width: 17px; } .editing col.due { width: 14rem; } .editing col.weight { width: 6rem; }
+  .editing col.mark { width: 10rem; }
   tr.overdue { background: var(--overdue-bg); }
   tr.upcoming { background: var(--upcoming-bg); }
   tr.missing { opacity: .55; }
@@ -84,7 +93,7 @@
 </form>
 <main>
   <p id="summary" class="info"></p>
-  <table><thead id="head"></thead><tbody id="list"></tbody></table>
+  <table id="items"><colgroup id="cols"></colgroup><thead id="head"></thead><tbody id="list"></tbody></table>
 </main>
 <table id="sources">
   <thead><tr><th>Website</th><th>Status</th><th>Last synced</th></tr></thead>
@@ -139,6 +148,14 @@ const left = (i) => { // time until due, e.g. "3d 4h" or "5h 20m"; computed at r
   const m = Math.floor(Math.abs(ms) / 6e4);
   const t = m >= 1440 ? `${Math.floor(m / 1440)}d ${Math.floor(m / 60) % 24}h` : `${Math.floor(m / 60)}h ${m % 60}m`;
   return ms < 0 ? `${t} overdue` : t;
+};
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const pad = (n) => String(n).padStart(2, '0');
+const dueText = (iso, now = new Date()) => { // "dd Mon | hh:mm", with the year only when it is not this year
+  if (!iso) return '';
+  const d = new Date(iso);
+  const year = d.getFullYear() === now.getFullYear() ? '' : ` ${d.getFullYear()}`;
+  return `${pad(d.getDate())} ${MONTHS[d.getMonth()]}${year} | ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 const markText = (i) => (i.mark == null ? '' : i.out_of == null ? round2(i.mark) : `${round2(i.mark)} / ${round2(i.out_of)}`);
 const localInput = (iso) => { // ISO -> value for <input type=datetime-local>
@@ -203,7 +220,7 @@ function row(item) {
   if (!editing()) { // view mode: plain text, no controls
     const tr = $('tr', {}, ...[item.done ? '✓' : '', item.kind ?? '', courseOf(item),
       (item.title ?? '') + (item.missing ? ' (missing from source)' : ''),
-      item.due ? new Date(item.due).toLocaleString() : '', left(item), round2(item.weight), markText(item)]
+      dueText(item.due), left(item), round2(item.weight), markText(item)]
       .map((t) => $('td', { textContent: String(t) })));
     tr.children[2].className = 'course';
     tr.classList.toggle('overdue', overdue(item));
@@ -314,7 +331,12 @@ function render() {
   summary.textContent = [course, ...(g.grade == null ? [] : [`${g.grade.toFixed(1)}%`]), `${(g.graded_pct || 0).toFixed(0)}% Graded`,
     ...(g.approximate ? ['approximate'] : []), ...(g.info || []).map((i) => `${i.name}: ${i.value}`)].join(' | '); // AC29/AC91
 
-  document.getElementById('head').replaceChildren($('tr', {}, ...['Done', 'Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',
+  const cols = ['done', 'type', 'course', 'title', 'due', 'left', 'weight', 'mark', ...(editing() ? ['source', 'actions'] : [])];
+  document.getElementById('items').classList.toggle('editing', editing());
+  document.getElementById('cols').replaceChildren(...cols.map((c) => $('col', { className: c })));
+  const done = $('th', { textContent: '✓', title: 'Done' });
+  done.setAttribute('aria-label', 'Done');
+  document.getElementById('head').replaceChildren($('tr', {}, done, ...['Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',
     ...(editing() ? ['Source', ''] : [])].map((h) => $('th', { textContent: h }))));
   document.getElementById('list').replaceChildren(...data.items
     .filter((i) => courses.includes(courseOf(i)) && picked(courseOf(i)) && keep(i))
@@ -336,6 +358,9 @@ document.getElementById('add').addEventListener('submit', add);
 document.getElementById('cal-back').addEventListener('click', () => { calOffset -= days(); render(); });
 document.getElementById('cal-fwd').addEventListener('click', () => { calOffset += days(); render(); });
 document.getElementById('cal-today').addEventListener('click', () => { calOffset = 0; render(); });
+const tick = document.body.appendChild($('span', { textContent: '✓' })); // size the Done column to the glyph
+document.documentElement.style.setProperty('--tick', `${Math.ceil(tick.getBoundingClientRect().width) + 4}px`);
+tick.remove();
 load();
 </script>
 </html>
