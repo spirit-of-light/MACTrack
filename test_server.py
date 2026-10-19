@@ -1926,7 +1926,7 @@ def test_index_calendar():
     assert "days()" in cal, "calendar length is not the upcoming window N"
     assert re.search(r"calOffset\s*-=\s*days\(\)", html) and re.search(r"calOffset\s*\+=\s*days\(\)", html), "arrows do not move by N days"
     assert re.search(r"calOffset\s*=\s*0\b", html), "Today button does not reset the calendar"
-    assert "onmouseenter: () => hl(true)" in html and "tr.dataset.day = localInput(i.due)[0]" in html, "calendar hover does not highlight rows"
+    assert "onmouseenter: () => hl(true)" in html and "tr.dataset.day = day;" in html, "calendar hover does not highlight rows"
     assert "'Source'" not in html and "title: `From ${item.source}" in html, "source is not a row tooltip in edit mode"
 
 
@@ -1946,7 +1946,7 @@ def test_index_single_list():
     for id_ in ("courses", "kinds", "statuses"):
         assert re.search(rf"<div id=['\"]{id_}['\"] class=['\"]chips['\"]", html), f"no #{id_} button row"
     assert re.search(r"\['', \.\.\.values\]\.map", html) and "v ? label(v) : 'All'" in html, "button rows do not start with All"
-    assert re.search(r"const keep = \(i\) => !\(hideDone && i\.done\) && \(!kind \|\| i\.kind === kind\)", html), \
+    assert re.search(r"const keep = \(i\) => !\(hideDone && i\.done\) && \(!kind \|\| kindOf\(i\) === kind\)", html), \
         "Hide done or Type filter not applied"
     assert "textContent: 'Hide done'" in html and "STATES" not in html, "status is not the single Hide done toggle"
     assert "tr.overdue { background: var(--overdue-bg); box-shadow: inset 3px 0 var(--overdue-text); }" in html, "overdue rows not red"
@@ -1967,8 +1967,9 @@ def test_index_single_list():
     assert ".sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b))" in html, "done items not listed after open ones"
     assert re.search(r"<th>Website</th><th>Status</th><th>Last synced</th>", html), "no sync status table"
     assert html.index('id="sources"') > html.index("</main>"), "sync table is not below the item list"
-    assert "TYPE_BUTTONS, kind" in html and re.search(r"TYPE_BUTTONS = KINDS\.filter\(\(k\) => k !== 'midterm' && k !== 'homework'\)", html), \
-        "midterm and homework still have type buttons"
+    assert "TYPE_BUTTONS, kind" in html and "TYPE_BUTTONS = KINDS.filter((k) => !['exam', 'midterm', 'homework'].includes(k))" in html, \
+        "exam, midterm or homework still have type buttons"
+    assert "const kindOf = (i) => (i.kind === 'exam' ? 'test' : i.kind);" in html, "exams are not shown as tests"
     assert re.search(r"const KINDS = \[[^\]]*'midterm'[^\]]*'homework'", html), "midterm or homework dropped from KINDS"
     assert "#items { table-layout: fixed;" in html, "item list columns not locked"
     assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
@@ -2003,6 +2004,21 @@ def test_index_single_save():
     assert ".chips button.course { border-left: 4px solid var(--c); }" in html and "var(--c, var(--text-faint))" not in html, \
         "grey edge on non-course buttons"
     assert "#add[hidden] { display: none; }" in html, "add form's display rule overrides hidden in view mode"
+
+
+def test_index_next_blocks_and_row_hover():
+    html = (ROOT / "index.html").read_text()
+    top = re.search(r'<div id="top">(.*?)<div id="calendar">', html, re.S)[1] + 'id="calendar"'
+    assert top.index('id="next-up"') < top.index('id="next-test"') < top.index('id="calendar"'), "top bar is not Next up, Next test, calendar"
+    assert "ahead.find((i) => !TESTS.includes(i.kind))" in html and "ahead.find((i) => TESTS.includes(i.kind))" in html, \
+        "Next up / Next test pick the wrong items"
+    assert "querySelector(`#calendar .day[data-day=\"${day}\"]`)" in html and "cell.dataset.day = day;" in html, \
+        "row hover does not highlight its calendar day"
+    js = re.search(r"^const roomOf = .*?^\};$", html, re.M | re.S)[0] + """
+const info = [{ name: 'Lab Room', value: 'ABB 126' }, { name: 'Test 1 Room', value: 'PGCLL B131' }, { name: 'Test 10 Room', value: 'X' }];
+console.log(JSON.stringify([roomOf('Test 1', info), roomOf('Test 2', info), roomOf('Test 10', info), roomOf('Exam', [])]));"""
+    got = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
+    assert got == ["PGCLL B131", None, "X", None], got
 
 
 if __name__ == "__main__":
