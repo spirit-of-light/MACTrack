@@ -1964,6 +1964,8 @@ def test_index_single_list():
         "top bar is not full width above the list and sidebar"
     assert "#filters { position: sticky; top: var(--head-top, 0);" in html, "sidebar does not stick below the calendar"
     assert "#cal-wrap { position: sticky;" in html, "calendar does not stay in view"
+    assert "margin: 0 1.5rem 1.5rem;" in html and "#top { display: flex; gap: .8rem; align-items: flex-start; padding-top: 1rem; }" in html, \
+        "page top margin makes the top bar jump when it pins"
     assert "grid-template-columns: repeat(7, var(--day)); grid-auto-rows: var(--day);" in html and "--day: 8.5rem;" in html, \
         "calendar days are not fixed squares"
     assert ".next { height: calc((2 * var(--day) + 1px - .6rem) / 2);" in html, "Next boxes are not a fixed size"
