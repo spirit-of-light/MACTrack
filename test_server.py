@@ -1951,6 +1951,8 @@ def test_index_single_list():
     assert "upcoming }" not in html and "Upcoming'" not in html, "Upcoming still offered as a status"
     assert html.index('id="calendar"') < html.index('id="courses"'), "calendar is not above the filters"
     assert re.search(r'<div id="layout">\s*<main>.*?</main>\s*<aside id="filters">', html, re.S), "filters are not a sidebar right of the list"
+    assert re.search(r'<main>\s*<div id="cal-wrap">.*?id="calendar".*?</div>\s*<p id="summary"', html, re.S), "calendar is not in the list column"
+    assert "#cal-wrap { position: sticky;" in html, "calendar does not stay in view"
     assert re.search(r'<nav id="cal-nav">(?:(?!</nav>).)*id="days"', html, re.S), "upcoming window not beside the calendar arrows"
     assert ".sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b))" in html, "done items not listed after open ones"
     assert re.search(r"<th>Website</th><th>Status</th><th>Last synced</th>", html), "no sync status table"
