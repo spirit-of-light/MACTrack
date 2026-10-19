@@ -1948,8 +1948,8 @@ def test_index_single_list():
     assert 'id="kinds"' not in html and "typeButtons" not in html, "type filter buttons are back"
     for id_ in ("courses", "statuses"):
         assert re.search(rf"<div id=['\"]{id_}['\"] class=['\"]chips['\"]", html), f"no #{id_} button row"
-    assert re.search(r"\['', \.\.\.values\]\.map", html) and "v ? label(v) : 'All'" in html, "button rows do not start with All"
-    assert "const shownKind = (i) => editing() || kindOf(i) !== 'other';" in html \
+    assert re.search(r"\['', \.\.\.values\]\.map", html) and "v || 'All'" in html, "button rows do not start with All"
+    assert "const shownKind = (i) => editing() || i.kind !== 'other';" in html \
         and "shownKind(i) && !i.done" in html, "other items show outside edit mode"
     assert "const keep = (i) => shownKind(i) && !(hideDone && i.done);" in html, "Hide done not applied"
     assert "textContent: 'Hide done'" in html and "STATES" not in html, "status is not the single Hide done toggle"
@@ -1983,7 +1983,6 @@ def test_index_single_list():
     assert ".sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b))" in html, "done items not listed after open ones"
     assert re.search(r"<th>Website</th><th>Status</th><th>Last synced</th>", html), "no sync status table"
     assert html.index('id="sources"') > html.index("</main>"), "sync table is not below the item list"
-    assert "const kindOf = (i) => (i.kind === 'exam' ? 'test' : i.kind);" in html, "exams are not shown as tests"
     assert re.search(r"const KINDS = \[[^\]]*'midterm'[^\]]*'homework'", html), "midterm or homework dropped from KINDS"
     assert ".items { table-layout: fixed;" in html, "item list columns not locked"
     assert html.index('id="tests"') < html.index('id="labs"') < html.index('id="items"'), "tables are not Tests, Labs, Coursework"
@@ -2088,6 +2087,9 @@ def test_index_tooltips_and_more():
     assert not re.search(r"\btitle\s*[:=]\s*[`'(]|\.title\s*=", js) and ' title="' not in html, "a browser title tooltip is left"
     assert '<div id="tip" role="tooltip" hidden></div>' in html and "closest('[data-tip]')" in html, "no page tooltip"
     assert "more.textContent = `+${n} more`;" in html, "full calendar days do not say +N more"
+    more = re.search(r"for \(const day of cal\.children\) \{.*?\n  \}", html, re.S)[0]
+    assert "tip(day," in more and "tip(cell," not in html, "calendar day tooltip shows without +N more"
+    assert html.count('data-tip-delay="1000"') == 3 and "Number(t.dataset.tipDelay) || 0" in html, "nav button tooltips are not delayed 1 s"
 
 
 if __name__ == "__main__":

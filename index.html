@@ -24,7 +24,8 @@
   .pair > * { flex: 1; min-width: 0; }
   .pair > input[type=date] { flex: 1.6; }
   #save:disabled { opacity: .5; cursor: default; background: var(--primary); }
-  button.icon, button.icon:hover { background: none; color: var(--text-muted); padding: 0; line-height: 0; }
+  button.icon, button.icon:hover { background: none; padding: 0; line-height: 0; }
+  button.icon { color: var(--text-muted); }
   td.act { padding: 0 2px; text-align: center; }
   button.icon:hover { color: var(--primary); }
   /* No increment buttons on weight, mark and out of */
@@ -71,8 +72,7 @@
   #layout:not(.editing) #pair col.left { width: 5rem; } #layout:not(.editing) #pair col.weight { width: 3.8rem; }
   #layout:not(.editing) #pair col.mark { width: 4rem; }
   #pair td { overflow-wrap: break-word; } /* break long words only when they cannot fit on a line of their own */
-  .list-h { font-size: 1rem; margin: 1.2rem 0 .3rem; color: var(--primary); }
-  .list-h:first-of-type { margin-top: .4rem; }
+  .list-h { font-size: 1rem; margin: .4rem 0 .3rem; color: var(--primary); }
   .items th:first-child, .items td:first-child { padding: 0 2px; text-align: center; }
   col.done { width: var(--tick, 1.2em); } /* checkmark width + 4px, measured at load */
   col.type { width: 6.5rem; } col.course { width: 8rem; } col.due { width: 9.5rem; } col.left { width: 7.5rem; }
@@ -92,7 +92,7 @@
   #cal-nav { display: flex; flex-direction: column; gap: .3rem; } /* up: back a week, circle: today, down: forward a week */
   #cal-nav button { padding: .25rem .35rem; line-height: 0; }
   /* Fixed square days, 7 per row; a day with more than fits clips, and its tooltip lists everything */
-  #calendar { display: grid; grid-template-columns: repeat(7, var(--day)); grid-auto-rows: var(--day);
+  #calendar { flex: none; display: grid; grid-template-columns: repeat(7, var(--day)); grid-auto-rows: var(--day);
     border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
   .day { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: .3rem .4rem;
     box-sizing: border-box; overflow: hidden; overflow-wrap: anywhere; }
@@ -102,14 +102,12 @@
   .day.hl { background: var(--primary-tint); box-shadow: inset 0 0 0 2px var(--primary); } /* hovered row's due day */
   /* Top bar: the calendar, its arrows, then the Next test box filling the rest */
   #top { display: flex; gap: .8rem; align-items: flex-start; padding-top: 1rem; } /* Next blocks keep their own height */
-  #cal-col { flex: none; }
   #next-test, #next-lab { flex: 1; min-width: 0; } /* two equal boxes fill the rest of the top bar */
-  /* Fixed boxes: 11rem wide, together as tall as the two calendar rows; long titles end in an ellipsis */
+  /* Next boxes: as tall as the calendar. Text scales with the box width (cqw), capped. Course and title on the left;
+     date, time, time left, weight and room right-aligned opposite them, wrapping underneath when the box is narrow. */
   .next { height: calc(2 * var(--day) + 1px); box-sizing: border-box; overflow: hidden; padding: .4rem .6rem;
-    border: 1px solid var(--border); border-left: 4px solid var(--c, var(--border)); }
-  /* Text scales with the box width (cqw), capped. Course and title on the left; date, time, time left, weight and
-     room right-aligned opposite them, wrapping underneath (still right-aligned) when the box is narrow. */
-  .next { display: flex; flex-direction: column; container-type: inline-size; }
+    border: 1px solid var(--border); border-left: 4px solid var(--c, var(--border));
+    display: flex; flex-direction: column; container-type: inline-size; }
   .next p { margin: 0 0 .2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .next h3 { font-size: .9rem; margin: 0 0 .4rem; color: var(--primary); }
   .next .body { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .2rem .8rem; }
@@ -132,13 +130,11 @@
 </style>
 <div id="cal-wrap">
   <div id="top">
-    <div id="cal-col">
-      <div id="calendar"></div>
-    </div>
+    <div id="calendar"></div>
     <nav id="cal-nav">
-      <button id="cal-back" aria-label="Previous week" data-tip="Previous week"></button>
-      <button id="cal-today" aria-label="Back to today" data-tip="Back to today"></button>
-      <button id="cal-fwd" aria-label="Next week" data-tip="Next week"></button>
+      <button id="cal-back" aria-label="Previous week" data-tip="Previous week" data-tip-delay="1000"></button>
+      <button id="cal-today" aria-label="Back to today" data-tip="Back to today" data-tip-delay="1000"></button>
+      <button id="cal-fwd" aria-label="Next week" data-tip="Next week" data-tip-delay="1000"></button>
     </nav>
     <div id="next-test" class="next" role="region" aria-label="Next test"></div>
     <div id="next-lab" class="next" role="region" aria-label="Next lab"></div>
@@ -201,9 +197,7 @@ const LOGIN = {
 };
 const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'other']; // practice is not tracked
 // Temporary, until the new grade calculation: "other" items show in edit mode only.
-const shownKind = (i) => editing() || kindOf(i) !== 'other';
-// Exams show as tests. Stored kinds stay as they are: the server matches an "Exams" outline category by kind.
-const kindOf = (i) => (i.kind === 'exam' ? 'test' : i.kind);
+const shownKind = (i) => editing() || i.kind !== 'other';
 const TESTS = ['test', 'exam', 'midterm']; // what Next test picks from
 const isLab = (i) => i.kind === 'lab';
 // An info entry like "Test 1 Room: PGCLL B131" gives the room of the item titled "Test 1".
@@ -346,7 +340,7 @@ async function remove(item) {
 
 function row(item) {
   if (!editing()) { // view mode: plain text, no controls
-    const tr = $('tr', {}, ...[item.done ? '✓' : '', kindOf(item) ?? '', courseOf(item),
+    const tr = $('tr', {}, ...[item.done ? '✓' : '', item.kind ?? '', courseOf(item),
       (item.title ?? '') + (item.missing ? ' (missing from source)' : ''),
       '', left(item), round2(item.weight), markText(item)]
       .map((t) => $('td', { textContent: String(t) })));
@@ -402,8 +396,8 @@ function row(item) {
 }
 
 // A row of toggle buttons, All first; the pressed one is the current filter.
-const chips = (values, current, pick, label = (v) => v) => ['', ...values].map((v) => {
-  const b = $('button', { textContent: v ? label(v) : 'All', onclick: () => { pick(v); render(); } });
+const chips = (values, current, pick) => ['', ...values].map((v) => {
+  const b = $('button', { textContent: v || 'All', onclick: () => { pick(v); render(); } });
   b.setAttribute('aria-pressed', String(v === current));
   return b;
 });
@@ -432,8 +426,6 @@ function calendar(items, colorOf) {
         return p;
       }));
     cell.dataset.day = day;
-    const due = [...cell.querySelectorAll('p')].map((p) => p.textContent);
-    if (due.length) tip(cell, [label, ...due].join('\n')); // everything due, even what "+N more" hides
     return cell;
   });
 }
@@ -490,6 +482,7 @@ function render() {
   for (const day of cal.children) { // a day with more than fits hides its last items behind "+N more"
     if (day.scrollHeight <= day.clientHeight) continue;
     const items = [...day.querySelectorAll('p')];
+    tip(day, [day.querySelector('h3').textContent, ...items.map((p) => p.textContent)].join('\n')); // what "+N more" hides
     const more = day.appendChild($('div', { className: 'more' }));
     for (let n = 1; n <= items.length && day.scrollHeight > day.clientHeight; n++) {
       items[items.length - n].hidden = true;
@@ -640,21 +633,30 @@ document.getElementById('cal-today').addEventListener('click', () => { calOffset
 const glyph = document.body.appendChild($('span', { textContent: '✓' })); // size the Done column to the glyph
 document.documentElement.style.setProperty('--tick', `${Math.ceil(glyph.getBoundingClientRect().width) + 4}px`);
 glyph.remove();
-// Page tooltip: any element with data-tip shows it below itself (above, near the bottom of the window).
+// Page tooltip: any element with data-tip shows it below itself (above, near the bottom of the window), after its
+// data-tip-delay in ms if it has one.
 const tipBox = document.getElementById('tip');
+let tipFor = null; // element whose tooltip is showing or pending
+let tipTimer;
+const hideTip = () => { clearTimeout(tipTimer); tipFor = null; tipBox.hidden = true; };
 document.addEventListener('mouseover', (e) => {
   const t = e.target.closest('[data-tip]');
-  tipBox.hidden = !t;
+  if (t === tipFor) return; // still inside the same element
+  hideTip();
   if (!t) return;
-  tipBox.textContent = t.dataset.tip;
-  const r = t.getBoundingClientRect();
-  const x = Math.min(Math.max(8, r.left + r.width / 2 - tipBox.offsetWidth / 2), innerWidth - tipBox.offsetWidth - 8);
-  const y = r.bottom + 6 + tipBox.offsetHeight > innerHeight - 8 ? r.top - tipBox.offsetHeight - 6 : r.bottom + 6;
-  tipBox.style.left = `${x}px`;
-  tipBox.style.top = `${y}px`;
+  tipFor = t;
+  tipTimer = setTimeout(() => {
+    tipBox.textContent = t.dataset.tip;
+    tipBox.hidden = false;
+    const r = t.getBoundingClientRect();
+    const x = Math.min(Math.max(8, r.left + r.width / 2 - tipBox.offsetWidth / 2), innerWidth - tipBox.offsetWidth - 8);
+    const y = r.bottom + 6 + tipBox.offsetHeight > innerHeight - 8 ? r.top - tipBox.offsetHeight - 6 : r.bottom + 6;
+    tipBox.style.left = `${x}px`;
+    tipBox.style.top = `${y}px`;
+  }, Number(t.dataset.tipDelay) || 0);
 });
-document.documentElement.addEventListener('mouseleave', () => { tipBox.hidden = true; });
-document.addEventListener('scroll', () => { tipBox.hidden = true; }, true);
+document.documentElement.addEventListener('mouseleave', hideTip);
+document.addEventListener('scroll', hideTip, true);
 load();
 </script>
 </html>
