@@ -324,6 +324,7 @@ function row(item) {
       '', left(item), round2(item.weight), markText(item)]
       .map((t) => $('td', { textContent: String(t) })));
     tr.children[2].className = 'course';
+    tr.children[5].className = 'left'; // tick() finds it by class: the tests table drops the Type column
     if (/^https?:\/\//i.test(item.url ?? '')) tr.children[3].replaceChildren(
       $('a', { href: item.url, target: '_blank', rel: 'noopener', textContent: item.title ?? '' }),
       item.missing ? ' (missing from source)' : '');
@@ -353,7 +354,7 @@ function row(item) {
   const tr = $('tr', { title: `From ${item.source}${item.missing ? ', missing from source' : ''}` },
     $('td', {}, inputs.done), $('td', {}, inputs.kind), $('td', { className: 'course', textContent: courseOf(item) }),
     $('td', {}, inputs.title), $('td', {}, $('div', { className: 'pair' }, inputs.date, inputs.time)),
-    $('td', { textContent: left(item) }), $('td', {}, inputs.weight),
+    $('td', { className: 'left', textContent: left(item) }), $('td', {}, inputs.weight),
     $('td', {}, $('div', { className: 'pair' }, inputs.mark, '/', inputs.out_of)),
     $('td', { className: 'act' }, ...(item.source === 'manual' ? [trash] : [])));
   const track = () => { // record this row's changes for the one Save button
@@ -509,12 +510,13 @@ function render() {
   // Tests (test, exam, midterm) get their own table above the coursework; same columns so they line up
   const parts = [['tests', shown.filter((i) => TESTS.includes(i.kind))], ['items', shown.filter((i) => !TESTS.includes(i.kind))]];
   for (const [id, items] of parts) {
+    const typed = id !== 'tests'; // every test is a test, so the tests table has no Type column
     const table = document.getElementById(id);
     table.classList.toggle('editing', editing());
-    table.querySelector('colgroup').replaceChildren(...cols.map((c) => $('col', { className: c })));
+    table.querySelector('colgroup').replaceChildren(...cols.filter((c) => typed || c !== 'type').map((c) => $('col', { className: c })));
     table.querySelector('thead').replaceChildren($('tr', {}, done(), ...['Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',
-      ...(editing() ? [''] : [])].map((h) => $('th', { textContent: h }))));
-    table.tBodies[0].replaceChildren(...items.map(toRow));
+      ...(editing() ? [''] : [])].filter((h) => typed || h !== 'Type').map((h) => $('th', { textContent: h }))));
+    table.tBodies[0].replaceChildren(...items.map(toRow).map((tr) => { if (!typed) tr.children[1].remove(); return tr; }));
   }
   // An empty part is hidden; with nothing at all, the coursework part says so
   document.getElementById('tests-part').hidden = !parts[0][1].length;
@@ -547,7 +549,7 @@ function tick() {
   const now = Date.now();
   let wait = Infinity;
   for (const [tr, i] of timed) {
-    tr.children[5].textContent = left(i);
+    tr.querySelector('.left').textContent = left(i);
     tr.classList.toggle('overdue', overdue(i));
     tr.classList.toggle('upcoming', upcoming(i));
     const rest = dueMs(i) - now;
