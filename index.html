@@ -177,7 +177,6 @@
     <button>Add</button>
   </form>
   <div id="courses" class="chips" role="group" aria-label="Course"></div>
-  <div id="kinds" class="chips" role="group" aria-label="Type"></div>
   <div id="statuses" class="chips" role="group" aria-label="Status"></div>
 </aside>
 </div>
@@ -195,11 +194,9 @@ const LOGIN = {
   childsmath: 'https://login.microsoftonline.com/44376307-b429-42ad-8c25-28cd496f4772/oauth2/v2.0/authorize?client_id=9132e1a8-fef6-4c34-bddb-de7608a2381a&response_type=code&response_mode=query&scope=https%3A%2F%2Fgraph.microsoft.com%2FUser.Read',
 };
 const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'other']; // practice is not tracked
-const TYPE_BUTTONS = KINDS.filter((k) => !['exam', 'midterm', 'homework'].includes(k)); // still stored and editable, just no filter button
-// Temporary, until the new grade calculation: "other" items (and their button) show in edit mode only.
+// Temporary, until the new grade calculation: "other" items show in edit mode only.
 const shownKind = (i) => editing() || kindOf(i) !== 'other';
-const typeButtons = () => TYPE_BUTTONS.filter((k) => editing() || k !== 'other');
-// Exams show and filter as tests. Stored kinds stay as they are: the server matches an "Exams" outline category by kind.
+// Exams show as tests. Stored kinds stay as they are: the server matches an "Exams" outline category by kind.
 const kindOf = (i) => (i.kind === 'exam' ? 'test' : i.kind);
 const TESTS = ['test', 'exam', 'midterm']; // what Next test picks from
 const isLab = (i) => i.kind === 'lab';
@@ -235,10 +232,9 @@ const EYE_SHUT = 'M2 10c3 4 6.5 6 10 6s7-2 10-6M5 13l-2 3M12 16v3M19 13l2 3';
 let data = { items: [], courses: {} };
 let status = {};
 let calOffset = 0; // calendar start, in days from today; not saved
-// Filters: course and type ('' is All) and Hide done; remembered in this browser only
+// Filters: course ('' is All) and Hide done; remembered in this browser only. Types need no filter: tests and labs have their own tables.
 const savedFilters = (() => { try { return JSON.parse(localStorage.getItem('filters')) || {}; } catch { return {}; } })();
 let course = savedFilters.course ?? '';
-let kind = savedFilters.kind ?? '';
 let hideDone = !!savedFilters.hideDone;
 const pending = new Map(); // item id -> { raw: changed input values, fields: what Save sends }; kept across re-renders
 
@@ -453,8 +449,7 @@ function render() {
   const visible = all.filter((c) => !hidden.includes(c));
   const courses = editing() ? all : visible; // edit mode lists hidden courses too, so they can be shown again
   if (!courses.includes(course)) course = '';
-  if (!typeButtons().includes(kind)) kind = '';
-  localStorage.setItem('filters', JSON.stringify({ course, kind, hideDone }));
+  localStorage.setItem('filters', JSON.stringify({ course, hideDone }));
   const addCourse = document.querySelector('#add [name=course]');
   const was = addCourse.value;
   addCourse.replaceChildren($('option', { value: '', textContent: 'Course' }),
@@ -475,12 +470,11 @@ function render() {
     eye.append(icon(off ? EYE_SHUT : EYE));
     return $('span', { className: off ? 'off' : '' }, b, eye);
   }));
-  document.getElementById('kinds').replaceChildren(...chips(typeButtons(), kind, (v) => { kind = v; }));
 
   const hide = $('button', { textContent: 'Hide done', onclick: () => { hideDone = !hideDone; render(); } });
   hide.setAttribute('aria-pressed', String(hideDone));
   document.getElementById('statuses').replaceChildren(hide);
-  const keep = (i) => shownKind(i) && !(hideDone && i.done) && (!kind || kindOf(i) === kind);
+  const keep = (i) => shownKind(i) && !(hideDone && i.done);
   const picked = (c) => !course || c === course;
   const cal = document.getElementById('calendar');
   cal.replaceChildren(...calendar(data.items.filter((i) => visible.includes(courseOf(i)) && picked(courseOf(i)) && keep(i)), colorOf));
@@ -564,7 +558,7 @@ function render() {
   document.getElementById('labs-part').hidden = !parts[1][1].length;
   document.getElementById('work-part').hidden = !parts[2][1].length && !!shown.length;
   if (!shown.length) {
-    const clear = $('button', { textContent: 'Clear filters', onclick: () => { course = ''; kind = ''; hideDone = false; render(); } });
+    const clear = $('button', { textContent: 'Clear filters', onclick: () => { course = ''; hideDone = false; render(); } });
     document.getElementById('list').append($('tr', {}, $('td', { className: 'empty', colSpan: cols.length }, 'No items match these filters.', clear)));
   }
   // Course grades under the list: every course shown in the course buttons (AC29)
