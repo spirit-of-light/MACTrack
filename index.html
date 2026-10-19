@@ -5,6 +5,7 @@
 <style>
   /* Tokens: ai-factory/designs/frontend.md */
   :root {
+    --day: 8.5rem; /* calendar day square; the Next boxes size from it */
     --primary: #7A013C; --primary-hover: #5E012E; --primary-tint: #F6E6EE; --on-primary: #FFFFFF;
     --bg: #FFFFFF; --surface: #FAFAFA; --text: #222222; --text-muted: #666666; --text-faint: #888888; --border: #EEEEEE;
     --overdue-bg: #FBD5D5; --overdue-text: #B3261E; --upcoming-bg: #FFF3C4;
@@ -81,7 +82,7 @@
   #cal-nav { display: flex; flex-direction: column; gap: .3rem; } /* up: back a week, circle: today, down: forward a week */
   #cal-nav button { padding: .25rem .35rem; line-height: 0; }
   /* Fixed square days, 7 per row; a day with more than fits clips, and its tooltip lists everything */
-  #calendar { display: grid; grid-template-columns: repeat(7, var(--day)); grid-auto-rows: var(--day); --day: 8.5rem;
+  #calendar { display: grid; grid-template-columns: repeat(7, var(--day)); grid-auto-rows: var(--day);
     border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
   .day { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: .3rem .4rem;
     box-sizing: border-box; overflow: hidden; overflow-wrap: anywhere; }
@@ -93,8 +94,10 @@
   #top { display: flex; gap: .8rem; align-items: flex-start; padding-top: 1rem; } /* Next blocks keep their own height */
   #cal-col { flex: none; }
   #next-col { flex: 0 0 11rem; display: flex; flex-direction: column; gap: .6rem; }
-  .next { padding: .4rem .6rem; border: 1px solid var(--border);
-    border-left: 4px solid var(--c, var(--border)); overflow-wrap: anywhere; }
+  /* Fixed boxes: 11rem wide, together as tall as the two calendar rows; long titles end in an ellipsis */
+  .next { height: calc((2 * var(--day) + 1px - .6rem) / 2); box-sizing: border-box; overflow: hidden; padding: .4rem .6rem;
+    border: 1px solid var(--border); border-left: 4px solid var(--c, var(--border)); }
+  .next p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .next h3 { font-size: .9rem; margin: 0 0 .3rem; color: var(--primary); }
   .next p { margin: 0 0 .15rem; }
   .next .course { color: var(--c); font-weight: 600; }
@@ -226,6 +229,18 @@ const dueText = (iso, now = new Date()) => { // ["dd Mon", "hh:mm"], with the ye
   return [`${pad(d.getDate())} ${MONTHS[d.getMonth()]}${year}`, `${pad(d.getHours())}:${pad(d.getMinutes())}`];
 };
 const DOT = 'M12 8a4 4 0 1 1 0 8a4 4 0 1 1 0-8z';
+const dateTime = (iso) => { // "dd Mon • hh:mm" as a 3-part grid; alignDots() lines the dots up per table
+  const [date, time] = dueText(iso);
+  const dot = icon(DOT);
+  dot.setAttribute('fill', 'currentColor');
+  return $('div', { className: 'due' }, $('span', { textContent: date }), dot, $('span', { textContent: time }));
+};
+// Line the dots up: size every date slot in a table to its widest date, measured with the slot unset
+const alignDots = (table) => {
+  table.style.removeProperty('--date-w');
+  const widths = [...table.querySelectorAll('.due span:first-child')].map((e) => e.getBoundingClientRect().width);
+  if (widths.length) table.style.setProperty('--date-w', `${Math.ceil(Math.max(...widths))}px`);
+};
 const markText = (i) => (i.mark == null ? '' : i.out_of == null ? round2(i.mark) : `${round2(i.mark)} / ${round2(i.out_of)}`);
 const localInput = (iso) => { // ISO -> ['YYYY-MM-DD', 'hh:mm'] for <input type=date> and <input type=time>
   if (!iso) return ['', ''];
@@ -304,10 +319,7 @@ function row(item) {
       $('a', { href: item.url, target: '_blank', rel: 'noopener', textContent: item.title ?? '' }),
       item.missing ? ' (missing from source)' : '');
     if (item.due) {
-      const [date, time] = dueText(item.due);
-      const dot = icon(DOT);
-      dot.setAttribute('fill', 'currentColor');
-      tr.children[4].replaceChildren($('div', { className: 'due' }, $('span', { textContent: date }), dot, $('span', { textContent: time })));
+      tr.children[4].replaceChildren(dateTime(item.due));
     }
     tr.classList.toggle('overdue', overdue(item));
     tr.classList.toggle('upcoming', upcoming(item));
@@ -400,7 +412,7 @@ function render() {
     $('td', {}, ...(s.status === 'login needed'
       ? [$('a', { href: LOGIN[src], target: '_blank', rel: 'noopener', textContent: 'login' }), ' needed']
       : [s.status])),
-    $('td', { textContent: new Date(s.synced_at).toLocaleString() }))));
+    $('td', {}, s.synced_at ? dateTime(s.synced_at) : ''))));
 
   const all = [...new Set(data.items.map(courseOf))].sort();
   const hidden = hiddenCourses();
@@ -447,17 +459,16 @@ function render() {
     el.style.setProperty('--c', i ? colorOf(courseOf(i)) : '');
     el.replaceChildren($('h3', { textContent: heading }), ...(i ? [
       $('p', { className: 'course', textContent: courseOf(i) }),
-      $('p', { textContent: i.title ?? '' }),
+      $('p', { textContent: i.title ?? '', title: i.title ?? '' }),
       $('p', { textContent: dueText(i.due).join(' • ') }),
-      $('p', { className: 'muted', textContent: `in ${left(i)}` }),
+      $('p', { className: 'muted', textContent: [`in ${left(i)}`, i.weight != null && `worth ${round2(i.weight)}%`].filter(Boolean).join(', ') }),
       ...extra.filter(Boolean).map((t) => $('p', { className: 'muted', textContent: t })),
     ] : [$('p', { className: 'muted', textContent: empty })]));
   };
   const nextUp = ahead.find((i) => !TESTS.includes(i.kind));
   const nextTest = ahead.find((i) => TESTS.includes(i.kind));
-  block('next-up', 'Next up', nextUp, 'Nothing due', [nextUp?.weight != null && `Worth ${round2(nextUp.weight)}%`]);
+  block('next-up', 'Next up', nextUp, 'Nothing due');
   block('next-test', 'Next test', nextTest, 'No tests scheduled', [
-    nextTest?.weight != null && `Worth ${round2(nextTest.weight)}%`,
     nextTest && roomOf(nextTest.title, data.courses[courseOf(nextTest)]?.info) && `Room ${roomOf(nextTest.title, data.courses[courseOf(nextTest)]?.info)}`,
   ]);
 
@@ -507,11 +518,8 @@ function render() {
   }));
   timed = [...document.querySelectorAll('#list tr')].map((tr) => [tr, tr.item]).filter(([, i]) => i && i.due && !i.done);
   tick();
-  // Line the dots up: size every date slot to the widest date shown, measured with the slot unset
-  const table = document.getElementById('items');
-  table.style.removeProperty('--date-w');
-  const widths = [...table.querySelectorAll('.due span:first-child')].map((e) => e.getBoundingClientRect().width);
-  if (widths.length) table.style.setProperty('--date-w', `${Math.ceil(Math.max(...widths))}px`);
+  alignDots(document.getElementById('items'));
+  alignDots(document.getElementById('sources'));
   pin();
 }
 
