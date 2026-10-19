@@ -180,6 +180,9 @@ const LOGIN = {
 };
 const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'other']; // practice is not tracked
 const TYPE_BUTTONS = KINDS.filter((k) => !['exam', 'midterm', 'homework'].includes(k)); // still stored and editable, just no filter button
+// Temporary, until the new grade calculation: "other" items (and their button) show in edit mode only.
+const shownKind = (i) => editing() || kindOf(i) !== 'other';
+const typeButtons = () => TYPE_BUTTONS.filter((k) => editing() || k !== 'other');
 // Exams show and filter as tests. Stored kinds stay as they are: the server matches an "Exams" outline category by kind.
 const kindOf = (i) => (i.kind === 'exam' ? 'test' : i.kind);
 const TESTS = ['test', 'exam', 'midterm']; // what Next test picks from
@@ -433,7 +436,7 @@ function render() {
   const visible = all.filter((c) => !hidden.includes(c));
   const courses = editing() ? all : visible; // edit mode lists hidden courses too, so they can be shown again
   if (!courses.includes(course)) course = '';
-  if (!TYPE_BUTTONS.includes(kind)) kind = '';
+  if (!typeButtons().includes(kind)) kind = '';
   localStorage.setItem('filters', JSON.stringify({ course, kind, hideDone }));
   const addCourse = document.querySelector('#add [name=course]');
   const was = addCourse.value;
@@ -455,18 +458,18 @@ function render() {
     eye.append(icon(off ? EYE_SHUT : EYE));
     return $('span', { className: off ? 'off' : '' }, b, eye);
   }));
-  document.getElementById('kinds').replaceChildren(...chips(TYPE_BUTTONS, kind, (v) => { kind = v; }));
+  document.getElementById('kinds').replaceChildren(...chips(typeButtons(), kind, (v) => { kind = v; }));
 
   const hide = $('button', { textContent: 'Hide done', onclick: () => { hideDone = !hideDone; render(); } });
   hide.setAttribute('aria-pressed', String(hideDone));
   document.getElementById('statuses').replaceChildren(hide);
-  const keep = (i) => !(hideDone && i.done) && (!kind || kindOf(i) === kind);
+  const keep = (i) => shownKind(i) && !(hideDone && i.done) && (!kind || kindOf(i) === kind);
   const picked = (c) => !course || c === course;
   const cal = document.getElementById('calendar');
   cal.replaceChildren(...calendar(data.items.filter((i) => visible.includes(courseOf(i)) && picked(courseOf(i)) && keep(i)), colorOf));
 
   // Next up: soonest not-done item still ahead, tests excluded; Next test: soonest test. Hidden courses and the course filter apply.
-  const ahead = data.items.filter((i) => !i.done && i.due && dueMs(i) >= Date.now() && visible.includes(courseOf(i))
+  const ahead = data.items.filter((i) => shownKind(i) && !i.done && i.due && dueMs(i) >= Date.now() && visible.includes(courseOf(i))
     && picked(courseOf(i))).sort((a, b) => dueMs(a) - dueMs(b));
   const block = (id, heading, i, empty, extra = []) => {
     const el = document.getElementById(id);

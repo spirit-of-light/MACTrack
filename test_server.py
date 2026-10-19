@@ -1948,7 +1948,9 @@ def test_index_single_list():
     for id_ in ("courses", "kinds", "statuses"):
         assert re.search(rf"<div id=['\"]{id_}['\"] class=['\"]chips['\"]", html), f"no #{id_} button row"
     assert re.search(r"\['', \.\.\.values\]\.map", html) and "v ? label(v) : 'All'" in html, "button rows do not start with All"
-    assert re.search(r"const keep = \(i\) => !\(hideDone && i\.done\) && \(!kind \|\| kindOf\(i\) === kind\)", html), \
+    assert "const shownKind = (i) => editing() || kindOf(i) !== 'other';" in html and "chips(typeButtons()," in html \
+        and "shownKind(i) && !i.done" in html, "other items or their button show outside edit mode"
+    assert re.search(r"const keep = \(i\) => shownKind\(i\) && !\(hideDone && i\.done\) && \(!kind \|\| kindOf\(i\) === kind\)", html), \
         "Hide done or Type filter not applied"
     assert "textContent: 'Hide done'" in html and "STATES" not in html, "status is not the single Hide done toggle"
     assert "tr.overdue { background: var(--overdue-bg); box-shadow: inset 3px 0 var(--overdue-text); }" in html, "overdue rows not red"
@@ -1978,7 +1980,7 @@ def test_index_single_list():
     assert ".sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b))" in html, "done items not listed after open ones"
     assert re.search(r"<th>Website</th><th>Status</th><th>Last synced</th>", html), "no sync status table"
     assert html.index('id="sources"') > html.index("</main>"), "sync table is not below the item list"
-    assert "TYPE_BUTTONS, kind" in html and "TYPE_BUTTONS = KINDS.filter((k) => !['exam', 'midterm', 'homework'].includes(k))" in html, \
+    assert "typeButtons(), kind" in html and "TYPE_BUTTONS = KINDS.filter((k) => !['exam', 'midterm', 'homework'].includes(k))" in html, \
         "exam, midterm or homework still have type buttons"
     assert "const kindOf = (i) => (i.kind === 'exam' ? 'test' : i.kind);" in html, "exams are not shown as tests"
     assert re.search(r"const KINDS = \[[^\]]*'midterm'[^\]]*'homework'", html), "midterm or homework dropped from KINDS"
