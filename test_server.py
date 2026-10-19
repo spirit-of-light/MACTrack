@@ -1946,7 +1946,11 @@ def test_index_single_list():
     for id_ in ("courses", "kinds", "statuses"):
         assert re.search(rf"<div id=['\"]{id_}['\"] class=['\"]chips['\"]", html), f"no #{id_} button row"
     assert re.search(r"\['', \.\.\.values\]\.map", html) and "v ? label(v) : 'All'" in html, "button rows do not start with All"
-    assert re.search(r"const keep = \(i\) => byStatus\(i\) && \(!kind \|\| i\.kind === kind\)", html), "Type filter not applied"
+    assert re.search(r"const keep = \(i\) => !\(hideDone && i\.done\) && \(!kind \|\| i\.kind === kind\)", html), \
+        "Hide done or Type filter not applied"
+    assert "textContent: 'Hide done'" in html and "STATES" not in html, "status is not the single Hide done toggle"
+    assert "tr.overdue { background: var(--overdue-bg); box-shadow: inset 3px 0 var(--overdue-text); }" in html, "overdue rows not red"
+    assert ".chips { display: grid; grid-template-columns: 1fr;" in html, "filter groups are not single columns"
     head = re.search(r"textContent: '✓', title: 'Done'.*?\['Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',", html, re.S)
     assert head, "list columns are not Done | Type | Course | Title | Due | Time left | Weight | Mark"
     assert "upcoming }" not in html and "Upcoming'" not in html, "Upcoming still offered as a status"

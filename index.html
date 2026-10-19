@@ -7,7 +7,7 @@
   :root {
     --primary: #7A013C; --primary-hover: #5E012E; --primary-tint: #F6E6EE; --on-primary: #FFFFFF;
     --bg: #FFFFFF; --surface: #FAFAFA; --text: #222222; --text-muted: #666666; --text-faint: #888888; --border: #EEEEEE;
-    --overdue-bg: #FBD5D5; --upcoming-bg: #FFF3C4; --banner-bg: #FDE2E1; --banner-border: #E0A3A0;
+    --overdue-bg: #FBD5D5; --overdue-text: #B3261E; --upcoming-bg: #FFF3C4; --banner-bg: #FDE2E1; --banner-border: #E0A3A0;
     --weekend-bg: #F2F2F2;
   }
   html { overscroll-behavior: none; } /* no rubber-band bounce past the top or bottom (macOS) */
@@ -22,7 +22,6 @@
   .pair { display: flex; gap: .3rem; align-items: center; }
   .pair > * { flex: 1; min-width: 0; }
   .pair > input[type=date] { flex: 1.6; }
-  .chips:has(> span) { grid-template-columns: 1fr; } /* edit mode: one course per row so the eye fits */
   #save:disabled { opacity: .5; cursor: default; background: var(--primary); }
   button.icon, button.icon:hover { background: none; color: var(--text-muted); padding: 0; line-height: 0; }
   td.act { padding: 0 2px; text-align: center; }
@@ -42,8 +41,7 @@
   #items thead th { position: sticky; top: var(--head-top, 0); z-index: 1; background: var(--bg); } /* column titles stay below the calendar */
   #filters { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; box-sizing: border-box; padding-top: 1rem;
     display: flex; flex-direction: column; gap: 1rem; }
-  .chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3rem; }
-  #statuses { grid-template-columns: 1fr; }
+  .chips { display: grid; grid-template-columns: 1fr; gap: .3rem; } /* one vertical column per filter group */
   @media (max-width: 900px) { #layout { grid-template-columns: 1fr; } #filters { position: static; order: -1; max-height: none; } }
   .chips > span { display: flex; }
   .chips > span > button:first-child { flex: 1; }
@@ -70,7 +68,8 @@
   div.due { display: grid; grid-template-columns: var(--date-w, max-content) 6px max-content; gap: .35em; align-items: center; }
   div.due span:first-child { text-align: right; }
   div.due svg { width: 6px; height: 6px; }
-  tr.overdue { background: var(--overdue-bg); }
+  tr.overdue { background: var(--overdue-bg); box-shadow: inset 3px 0 var(--overdue-text); }
+  tr.overdue td:nth-child(6) { color: var(--overdue-text); font-weight: 600; } /* "… overdue" in Time left */
   tr.upcoming { background: var(--upcoming-bg); }
   tr.missing { opacity: .55; }
   tr.hl { background: var(--primary-tint); box-shadow: inset 3px 0 var(--primary); } /* due on the hovered calendar day */
@@ -98,7 +97,7 @@
       <button id="cal-back" aria-label="Previous days">←</button>
       <button id="cal-today">Today</button>
       <button id="cal-fwd" aria-label="Next days">→</button>
-      <span id="windows" role="group" aria-label="Upcoming window"></span>
+      <span id="windows" role="group" aria-label="Upcoming window (days)"></span>
     </nav>
     <div id="calendar"></div>
   </div>
@@ -170,9 +169,8 @@ let status = {};
 let calOffset = 0; // calendar start, in days from today; not saved
 let course = ''; // course and type filters; '' is All; not saved
 let kind = '';
-let state = ''; // status filter
+let hideDone = false; // status filter: one toggle; not saved
 const pending = new Map(); // item id -> { raw: changed input values, fields: what Save sends }; kept across re-renders
-const STATES = { open: 'Not done', done: 'Done', overdue: 'Overdue' };
 
 const dueMs = (i) => (i.due ? new Date(i.due).getTime() : Infinity);
 const overdue = (i) => !i.done && dueMs(i) < Date.now();
@@ -355,7 +353,7 @@ function render() {
   document.getElementById('save').hidden = !editing();
   saveState();
   document.getElementById('windows').replaceChildren(...WINDOWS.map((n) => {
-    const b = $('button', { textContent: `${n} days`, onclick: () => { localStorage.setItem('upcomingDays', n); render(); } });
+    const b = $('button', { textContent: String(n), onclick: () => { localStorage.setItem('upcomingDays', n); render(); } });
     b.setAttribute('aria-pressed', String(n === days()));
     return b;
   }));
@@ -397,9 +395,10 @@ function render() {
   }));
   document.getElementById('kinds').replaceChildren(...chips(TYPE_BUTTONS, kind, (v) => { kind = v; }));
 
-  document.getElementById('statuses').replaceChildren(...chips(Object.keys(STATES), state, (v) => { state = v; }, (v) => STATES[v]));
-  const byStatus = { '': () => true, open: (i) => !i.done, done: (i) => !!i.done, overdue }[state];
-  const keep = (i) => byStatus(i) && (!kind || i.kind === kind);
+  const hide = $('button', { textContent: 'Hide done', onclick: () => { hideDone = !hideDone; render(); } });
+  hide.setAttribute('aria-pressed', String(hideDone));
+  document.getElementById('statuses').replaceChildren(hide);
+  const keep = (i) => !(hideDone && i.done) && (!kind || i.kind === kind);
   const picked = (c) => !course || c === course;
   const cal = document.getElementById('calendar');
   cal.replaceChildren(...calendar(data.items.filter((i) => visible.includes(courseOf(i)) && picked(courseOf(i)) && keep(i)), colorOf));
