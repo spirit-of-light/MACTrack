@@ -1952,7 +1952,9 @@ def test_index_single_list():
     assert html.index('id="calendar"') < html.index('id="courses"'), "calendar is not above the filters"
     assert re.search(r'<div id="layout">\s*<main>.*?</main>\s*<aside id="filters">', html, re.S), "filters are not a sidebar right of the list"
     assert re.search(r'<main>\s*<div id="cal-wrap">.*?id="calendar".*?</div>\s*<p id="summary"', html, re.S), "calendar is not in the list column"
-    assert "#cal-wrap { position: sticky;" in html, "calendar does not stay in view"
+    assert "#cal-wrap.pinned { position: sticky;" in html and "classList.toggle('pinned', days() <= 14)" in html, \
+        "calendar does not stay in view only while N <= 14"
+    assert re.search(r"#items thead th \{ position: sticky; top: var\(--head-top", html), "column titles do not follow scrolling"
     assert re.search(r'<nav id="cal-nav">(?:(?!</nav>).)*id="days"', html, re.S), "upcoming window not beside the calendar arrows"
     assert ".sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b))" in html, "done items not listed after open ones"
     assert re.search(r"<th>Website</th><th>Status</th><th>Last synced</th>", html), "no sync status table"
@@ -1960,7 +1962,7 @@ def test_index_single_list():
     assert "TYPE_BUTTONS, kind" in html and re.search(r"TYPE_BUTTONS = KINDS\.filter\(\(k\) => k !== 'midterm' && k !== 'homework'\)", html), \
         "midterm and homework still have type buttons"
     assert re.search(r"const KINDS = \[[^\]]*'midterm'[^\]]*'homework'", html), "midterm or homework dropped from KINDS"
-    assert "#items { table-layout: fixed; }" in html, "item list columns not locked"
+    assert "#items { table-layout: fixed;" in html, "item list columns not locked"
     assert "Progress" not in html and "<section" not in html, "progress column or per-course sections remain"
     assert "round2(item.weight), markText(item)" in html and "round2(i.mark)" in html, "weight and mark not rounded in view mode"
 
@@ -1990,6 +1992,7 @@ def test_index_single_save():
     assert re.search(r'<select name="course" required', html), "add-item course is not a select"
     assert "appearance: textfield" in html, "number inputs still show increment buttons"
     assert "#layout.editing" not in html, "edit mode has its own layout"
+    assert "#add[hidden] { display: none; }" in html, "add form's display rule overrides hidden in view mode"
 
 
 if __name__ == "__main__":

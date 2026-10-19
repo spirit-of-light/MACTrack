@@ -16,6 +16,7 @@
   button { background: var(--primary); color: var(--on-primary); border: 0; padding: .25rem .7rem; font: inherit; cursor: pointer; }
   button:hover, button:active { background: var(--primary-hover); }
   #add { display: flex; flex-direction: column; gap: .3rem; background: var(--surface); padding: .6rem; }
+  #add[hidden] { display: none; }
   #add input, #add select { width: 100%; box-sizing: border-box; font: inherit; min-width: 0; }
   .pair { display: flex; gap: .3rem; align-items: center; }
   .pair > * { flex: 1; min-width: 0; }
@@ -35,7 +36,9 @@
   /* Item list with the filter sidebar on its right; the sidebar stays in view while the list scrolls */
   #layout { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; gap: 1.5rem; align-items: start; }
   /* Calendar and sidebar both stay in view while the list scrolls under the calendar */
-  #cal-wrap { position: sticky; top: 0; z-index: 1; background: var(--bg); padding-bottom: .4rem; }
+  #cal-wrap { background: var(--bg); padding-bottom: .4rem; }
+  #cal-wrap.pinned { position: sticky; top: 0; z-index: 2; } /* only while N <= 14 */
+  #items thead th { position: sticky; top: var(--head-top, 0); z-index: 1; background: var(--bg); } /* column titles stay below the calendar */
   #filters { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; box-sizing: border-box; padding-top: 1rem;
     display: flex; flex-direction: column; gap: 1rem; }
   .chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3rem; }
@@ -54,7 +57,7 @@
   td input, td select { width: 100%; box-sizing: border-box; font: inherit; min-width: 0; } /* stay inside fixed columns */
   td input[type=checkbox] { width: auto; margin: 0; }
   /* Item list: fixed column widths so filtering never shifts columns; Title takes the rest */
-  #items { table-layout: fixed; }
+  #items { table-layout: fixed; border-collapse: separate; border-spacing: 0; } /* separate borders: sticky titles paint cleanly in Firefox */
   #items td { overflow-wrap: anywhere; }
   #items th:first-child, #items td:first-child { padding: 0 2px; text-align: center; }
   col.done { width: var(--tick, 1.2em); } /* checkmark width + 4px, measured at load */
@@ -413,7 +416,16 @@ function render() {
   list.style.removeProperty('--date-w');
   const widths = [...list.querySelectorAll('.due span:first-child')].map((e) => e.getBoundingClientRect().width);
   if (widths.length) list.style.setProperty('--date-w', `${Math.ceil(Math.max(...widths))}px`);
+  pin();
 }
+
+// The calendar stays in view only for N <= 14 (two rows); the column titles stick just below it, or to the top.
+function pin() {
+  const wrap = document.getElementById('cal-wrap');
+  wrap.classList.toggle('pinned', days() <= 14);
+  document.getElementById('items').style.setProperty('--head-top', `${days() <= 14 ? wrap.offsetHeight : 0}px`);
+}
+window.addEventListener('resize', pin);
 
 const daysInput = document.getElementById('days');
 daysInput.value = days();
