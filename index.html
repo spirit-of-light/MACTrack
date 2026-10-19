@@ -22,7 +22,8 @@
   .pair > input[type=date] { flex: 1.6; }
   .chips:has(> span) { grid-template-columns: 1fr; } /* edit mode: one course per row so the eye fits */
   #save:disabled { opacity: .5; cursor: default; background: var(--primary); }
-  button.icon, button.icon:hover { background: none; color: var(--text-muted); padding: 0; }
+  button.icon, button.icon:hover { background: none; color: var(--text-muted); padding: 0; line-height: 0; }
+  td.act { padding: 0 2px; text-align: center; }
   button.icon:hover { color: var(--primary); }
   /* No increment buttons on weight, mark and out of */
   td input[type=number], #add input[type=number] { appearance: textfield; -moz-appearance: textfield; }
@@ -50,7 +51,7 @@
   td.course { color: var(--c); font-weight: 600; white-space: nowrap; }
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: .15rem .3rem; border-bottom: 1px solid var(--border); }
-  td input { width: 100%; box-sizing: border-box; font: inherit; }
+  td input, td select { width: 100%; box-sizing: border-box; font: inherit; min-width: 0; } /* stay inside fixed columns */
   td input[type=checkbox] { width: auto; margin: 0; }
   /* Item list: fixed column widths so filtering never shifts columns; Title takes the rest */
   #items { table-layout: fixed; }
@@ -58,8 +59,8 @@
   #items th:first-child, #items td:first-child { padding: 0 2px; text-align: center; }
   col.done { width: var(--tick, 1.2em); } /* checkmark width + 4px, measured at load */
   col.type { width: 6.5rem; } col.course { width: 8rem; } col.due { width: 9.5rem; } col.left { width: 7.5rem; }
-  col.weight { width: 4.5rem; } col.mark { width: 6rem; } col.actions { width: 2.2rem; }
-  .editing col.done { width: 17px; } .editing col.type { width: 6rem; } .editing col.due { width: 15.5rem; }
+  col.weight { width: 4.5rem; } col.mark { width: 6rem; } col.actions { width: 22px; } /* 18px trash icon + 4px */
+  .editing col.done { width: 17px; } .editing col.type { width: 7rem; } .editing col.due { width: 15.5rem; }
   .editing col.left { width: 6rem; } .editing col.weight { width: 4rem; } .editing col.mark { width: 7rem; }
   /* Due cell: date right-aligned in a slot as wide as the widest date, so the dots line up */
   div.due { display: grid; grid-template-columns: var(--date-w, max-content) 6px max-content; gap: .35em; align-items: center; }
@@ -288,7 +289,7 @@ function row(item) {
     $('td', {}, inputs.title), $('td', {}, $('div', { className: 'pair' }, inputs.date, inputs.time)),
     $('td', { textContent: left(item) }), $('td', {}, inputs.weight),
     $('td', {}, $('div', { className: 'pair' }, inputs.mark, '/', inputs.out_of)),
-    $('td', {}, ...(item.source === 'manual' ? [trash] : [])));
+    $('td', { className: 'act' }, ...(item.source === 'manual' ? [trash] : [])));
   const track = () => { // record this row's changes for the one Save button
     const changed = Object.keys(inputs).filter((k) => raw(inputs[k]) !== orig[k]);
     const fields = Object.fromEntries(changed.filter((k) => k !== 'date' && k !== 'time').map((k) => [k, parsed(inputs[k])]));
