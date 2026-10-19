@@ -46,6 +46,10 @@
   col.weight { width: 4.5rem; } col.mark { width: 6rem; } col.source { width: 6.5rem; } col.actions { width: 8.5rem; }
   .editing col.done { width: 17px; } .editing col.due { width: 14rem; } .editing col.weight { width: 6rem; }
   .editing col.mark { width: 10rem; }
+  /* Due cell: date right-aligned in a slot as wide as the widest date, so the dots line up */
+  .due { display: grid; grid-template-columns: var(--date-w, max-content) 6px max-content; gap: .35em; align-items: center; }
+  .due span:first-child { text-align: right; }
+  .due svg { width: 6px; height: 6px; }
   tr.overdue { background: var(--overdue-bg); }
   tr.upcoming { background: var(--upcoming-bg); }
   tr.missing { opacity: .55; }
@@ -151,12 +155,13 @@ const left = (i) => { // time until due, e.g. "3d 4h" or "5h 20m"; computed at r
 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const pad = (n) => String(n).padStart(2, '0');
-const dueText = (iso, now = new Date()) => { // "dd Mon | hh:mm", with the year only when it is not this year
-  if (!iso) return '';
+const dueText = (iso, now = new Date()) => { // ["dd Mon", "hh:mm"], with the year only when it is not this year
+  if (!iso) return [];
   const d = new Date(iso);
   const year = d.getFullYear() === now.getFullYear() ? '' : ` ${d.getFullYear()}`;
-  return `${pad(d.getDate())} ${MONTHS[d.getMonth()]}${year} | ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return [`${pad(d.getDate())} ${MONTHS[d.getMonth()]}${year}`, `${pad(d.getHours())}:${pad(d.getMinutes())}`];
 };
+const DOT = 'M12 8a4 4 0 1 1 0 8a4 4 0 1 1 0-8z';
 const markText = (i) => (i.mark == null ? '' : i.out_of == null ? round2(i.mark) : `${round2(i.mark)} / ${round2(i.out_of)}`);
 const localInput = (iso) => { // ISO -> value for <input type=datetime-local>
   if (!iso) return '';
@@ -220,9 +225,15 @@ function row(item) {
   if (!editing()) { // view mode: plain text, no controls
     const tr = $('tr', {}, ...[item.done ? '✓' : '', item.kind ?? '', courseOf(item),
       (item.title ?? '') + (item.missing ? ' (missing from source)' : ''),
-      dueText(item.due), left(item), round2(item.weight), markText(item)]
+      '', left(item), round2(item.weight), markText(item)]
       .map((t) => $('td', { textContent: String(t) })));
     tr.children[2].className = 'course';
+    if (item.due) {
+      const [date, time] = dueText(item.due);
+      const dot = icon(DOT);
+      dot.setAttribute('fill', 'currentColor');
+      tr.children[4].replaceChildren($('div', { className: 'due' }, $('span', { textContent: date }), dot, $('span', { textContent: time })));
+    }
     tr.classList.toggle('overdue', overdue(item));
     tr.classList.toggle('upcoming', upcoming(item));
     tr.classList.toggle('missing', !!item.missing);
@@ -347,6 +358,11 @@ function render() {
       tr.classList.toggle('off', hidden.includes(courseOf(i)));
       return tr;
     }));
+  // Line the dots up: size every date slot to the widest date shown, measured with the slot unset
+  const list = document.getElementById('items');
+  list.style.removeProperty('--date-w');
+  const widths = [...list.querySelectorAll('.due span:first-child')].map((e) => e.getBoundingClientRect().width);
+  if (widths.length) list.style.setProperty('--date-w', `${Math.ceil(Math.max(...widths))}px`);
 }
 
 const daysInput = document.getElementById('days');

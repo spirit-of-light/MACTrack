@@ -1972,7 +1972,8 @@ const out = [dueText(null, now), dueText(new Date(2026, 9, 20, 9, 5).toISOString
   dueText(new Date(2027, 0, 3, 23, 59).toISOString(), now)];
 console.log(JSON.stringify(out));"""
     got = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
-    assert got == ["", "20 Oct | 09:05", "03 Jan 2027 | 23:59"], got
+    assert got == [[], ["20 Oct", "09:05"], ["03 Jan 2027", "23:59"]], got
+    assert "grid-template-columns: var(--date-w, max-content)" in html and "--date-w" in html, "due dots not aligned"
 
 
 if __name__ == "__main__":
