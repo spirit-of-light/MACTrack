@@ -15,7 +15,19 @@
   :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
   button { background: var(--primary); color: var(--on-primary); border: 0; padding: .25rem .7rem; font: inherit; cursor: pointer; }
   button:hover, button:active { background: var(--primary-hover); }
-  #add { background: var(--surface); padding: .4rem .6rem; }
+  #add { display: flex; flex-direction: column; gap: .3rem; background: var(--surface); padding: .6rem; }
+  #add input, #add select { width: 100%; box-sizing: border-box; font: inherit; min-width: 0; }
+  .pair { display: flex; gap: .3rem; align-items: center; }
+  .pair > * { flex: 1; min-width: 0; }
+  .pair > input[type=date] { flex: 1.6; }
+  .chips:has(> span) { grid-template-columns: 1fr; } /* edit mode: one course per row so the eye fits */
+  #save:disabled { opacity: .5; cursor: default; background: var(--primary); }
+  button.icon, button.icon:hover { background: none; color: var(--text-muted); padding: 0; }
+  button.icon:hover { color: var(--primary); }
+  /* No increment buttons on weight, mark and out of */
+  td input[type=number], #add input[type=number] { appearance: textfield; -moz-appearance: textfield; }
+  td input[type=number]::-webkit-inner-spin-button, #add input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+  tr.changed td:first-child { box-shadow: inset 3px 0 var(--primary); } /* unsaved edits */
   #edit { display: inline-flex; align-items: center; gap: .3rem; margin-top: 1rem; }
   .banner { background: var(--banner-bg); border: 1px solid var(--banner-border); padding: .4rem .6rem; margin: .3rem 0; }
   #sources { margin-top: 2rem; width: auto; color: var(--text-muted); }
@@ -23,15 +35,11 @@
   #layout { display: grid; grid-template-columns: minmax(0, 1fr) 18rem; gap: 1.5rem; align-items: start; }
   /* Calendar and sidebar both stay in view while the list scrolls under the calendar */
   #cal-wrap { position: sticky; top: 0; z-index: 1; background: var(--bg); padding-bottom: .4rem; }
-  #filters { position: sticky; top: 0; padding-top: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+  #filters { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; box-sizing: border-box; padding-top: 1rem;
+    display: flex; flex-direction: column; gap: 1rem; }
   .chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3rem; }
   #statuses { grid-template-columns: 1fr; }
-  /* Edit mode needs the full width for its inputs, so the filters go above the list in a row; same on narrow screens */
-  #layout.editing { grid-template-columns: 1fr; }
-  #layout.editing #filters { position: static; order: -1; padding-top: 0; flex-direction: row; flex-wrap: wrap; align-items: start; }
-  #layout.editing .chips { width: 18rem; }
-  #layout.editing #courses { width: 24rem; }
-  @media (max-width: 900px) { #layout { grid-template-columns: 1fr; } #filters { position: static; order: -1; } }
+  @media (max-width: 900px) { #layout { grid-template-columns: 1fr; } #filters { position: static; order: -1; max-height: none; } }
   .chips > span { display: flex; }
   .chips > span > button:first-child { flex: 1; }
   .chips button { background: var(--bg); color: var(--text); border: 1px solid var(--text-faint);
@@ -43,7 +51,6 @@
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: .15rem .3rem; border-bottom: 1px solid var(--border); }
   td input { width: 100%; box-sizing: border-box; font: inherit; }
-  td input[type=number] { width: 5em; }
   td input[type=checkbox] { width: auto; margin: 0; }
   /* Item list: fixed column widths so filtering never shifts columns; Title takes the rest */
   #items { table-layout: fixed; }
@@ -51,9 +58,9 @@
   #items th:first-child, #items td:first-child { padding: 0 2px; text-align: center; }
   col.done { width: var(--tick, 1.2em); } /* checkmark width + 4px, measured at load */
   col.type { width: 6.5rem; } col.course { width: 8rem; } col.due { width: 9.5rem; } col.left { width: 7.5rem; }
-  col.weight { width: 4.5rem; } col.mark { width: 6rem; } col.source { width: 6.5rem; } col.actions { width: 8.5rem; }
-  .editing col.done { width: 17px; } .editing col.due { width: 13.5rem; } .editing col.weight { width: 6rem; }
-  .editing col.mark { width: 11rem; }
+  col.weight { width: 4.5rem; } col.mark { width: 6rem; } col.actions { width: 2.2rem; }
+  .editing col.done { width: 17px; } .editing col.type { width: 6rem; } .editing col.due { width: 15.5rem; }
+  .editing col.left { width: 6rem; } .editing col.weight { width: 4rem; } .editing col.mark { width: 7rem; }
   /* Due cell: date right-aligned in a slot as wide as the widest date, so the dots line up */
   div.due { display: grid; grid-template-columns: var(--date-w, max-content) 6px max-content; gap: .35em; align-items: center; }
   div.due span:first-child { text-align: right; }
@@ -61,7 +68,6 @@
   tr.overdue { background: var(--overdue-bg); }
   tr.upcoming { background: var(--upcoming-bg); }
   tr.missing { opacity: .55; }
-  .src { color: var(--text-faint); font-size: .85em; }
   .info { color: var(--text-muted); margin: 0 0 .3rem; }
   #cal-nav { display: flex; align-items: center; gap: .3rem; padding: 1rem 0 .4rem; margin: 0; }
   #cal-nav label { margin-left: .8rem; }
@@ -78,18 +84,6 @@
   .day p.done { text-decoration: line-through; color: var(--text-muted); }
 </style>
 <div id="banners"></div>
-<form id="add">
-  <strong>Add item</strong>
-  <input name="course" list="known-courses" placeholder="Course" required>
-  <datalist id="known-courses"></datalist>
-  <input name="title" placeholder="Title" required>
-  <select name="kind"><option value="">kind from title</option></select>
-  <input name="due" type="datetime-local">
-  <input name="weight" type="number" step="any" placeholder="Weight" style="width:5em">
-  <input name="mark" type="number" step="any" placeholder="Mark" style="width:5em">
-  <input name="out_of" type="number" step="any" placeholder="Out of" style="width:5em">
-  <button>Add</button>
-</form>
 <div id="layout">
 <main>
   <div id="cal-wrap">
@@ -105,6 +99,20 @@
   <table id="items"><colgroup id="cols"></colgroup><thead id="head"></thead><tbody id="list"></tbody></table>
 </main>
 <aside id="filters">
+  <button id="save">Save</button>
+  <form id="add">
+    <strong>Add item</strong>
+    <select name="course" required aria-label="Course"><option value="">Course</option></select>
+    <input name="title" placeholder="Title" required aria-label="Title">
+    <select name="kind" aria-label="Type"><option value="">Type from title</option></select>
+    <div class="pair"><input name="date" type="date" aria-label="Due date"><input name="time" type="time" aria-label="Due time"></div>
+    <div class="pair">
+      <input name="weight" type="number" step="any" placeholder="Weight" aria-label="Weight">
+      <input name="mark" type="number" step="any" placeholder="Mark" aria-label="Mark">
+      <input name="out_of" type="number" step="any" placeholder="Out of" aria-label="Out of">
+    </div>
+    <button>Add</button>
+  </form>
   <div id="courses" class="chips" role="group" aria-label="Course"></div>
   <div id="kinds" class="chips" role="group" aria-label="Type"></div>
   <div id="statuses" class="chips" role="group" aria-label="Status"></div>
@@ -144,6 +152,7 @@ const icon = (d) => { // stroked 24px SVG from one path; built with DOM calls, n
 const EYE = 'M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zM15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0';
 const PENCIL = 'M16.5 3.5l4 4L8 20H4v-4L16.5 3.5z';
 const PAGE = 'M14 2H5v20h14V7l-5-5zM14 2v5h5M8 13h8M8 17h8';
+const TRASH = 'M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15M10 11v6M14 11v6';
 const EYE_SHUT = 'M2 10c3 4 6.5 6 10 6s7-2 10-6M5 13l-2 3M12 16v3M19 13l2 3';
 let data = { items: [], courses: {} };
 let status = {};
@@ -151,6 +160,7 @@ let calOffset = 0; // calendar start, in days from today; not saved
 let course = ''; // course and type filters; '' is All; not saved
 let kind = '';
 let state = ''; // status filter
+const pending = new Map(); // item id -> { raw: changed input values, fields: what Save sends }; kept across re-renders
 const STATES = { open: 'Not done', done: 'Done', overdue: 'Overdue' };
 
 const dueMs = (i) => (i.due ? new Date(i.due).getTime() : Infinity);
@@ -174,46 +184,54 @@ const dueText = (iso, now = new Date()) => { // ["dd Mon", "hh:mm"], with the ye
 };
 const DOT = 'M12 8a4 4 0 1 1 0 8a4 4 0 1 1 0-8z';
 const markText = (i) => (i.mark == null ? '' : i.out_of == null ? round2(i.mark) : `${round2(i.mark)} / ${round2(i.out_of)}`);
-const localInput = (iso) => { // ISO -> value for <input type=datetime-local>
-  if (!iso) return '';
+const localInput = (iso) => { // ISO -> ['YYYY-MM-DD', 'hh:mm'] for <input type=date> and <input type=time>
+  if (!iso) return ['', ''];
   const d = new Date(iso);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16).split('T');
 };
+const joinDue = (date, time) => (date ? new Date(`${date}T${time || '23:59'}`).toISOString() : null); // no time: end of day
 
 async function load() {
   [data, status] = await Promise.all([
     fetch('/api/items').then((r) => r.json()),
     fetch('/api/status').then((r) => r.json()),
   ]);
+  for (const id of pending.keys()) if (!data.items.some((i) => i.id === id)) pending.delete(id);
   render();
 }
 
 const raw = (input) => (input.type === 'checkbox' ? input.checked : input.value);
 const parsed = (input) => (input.type === 'checkbox' ? input.checked
   : input.type === 'number' ? (input.value === '' ? null : Number(input.value))
-  : input.type === 'datetime-local' ? (input.value ? new Date(input.value).toISOString() : null)
   : input.value);
 
-// AC31: send only the fields the user changed, then reload.
-async function save(item, inputs, orig) {
-  const fields = {};
-  for (const [k, input] of Object.entries(inputs)) if (raw(input) !== orig[k]) fields[k] = parsed(input);
-  if (!Object.keys(fields).length) return;
-  const r = await fetch(`/api/items/${item.id}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields),
-  });
-  if (!r.ok) alert(`Save failed: ${r.status}`);
+// AC31: one Save for every changed row; each item gets one POST with only its changed fields, then reload.
+async function saveAll() {
+  for (const [id, p] of pending) {
+    const r = await fetch(`/api/items/${id}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p.fields),
+    });
+    if (!r.ok) { alert(`Save failed: ${r.status}`); break; }
+    pending.delete(id);
+  }
   load();
 }
+const saveState = () => {
+  const b = document.getElementById('save');
+  b.disabled = !pending.size;
+  b.textContent = pending.size ? `Save (${pending.size})` : 'Save';
+};
 
 // AC105/AC111: add a manual item; empty optional fields are left out.
 async function add(ev) {
   ev.preventDefault();
   const body = {};
-  for (const input of ev.target.querySelectorAll('[name]')) {
+  for (const input of ev.target.querySelectorAll('[name]:not([name=date]):not([name=time])')) {
     const v = parsed(input);
     if (v !== null && v !== '') body[input.name] = v;
   }
+  const due = joinDue(ev.target.elements.date.value, ev.target.elements.time.value);
+  if (due) body.due = due;
   const r = await fetch('/api/items', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
@@ -250,22 +268,38 @@ function row(item) {
     tr.classList.toggle('missing', !!item.missing);
     return tr;
   }
+  const [date, time] = localInput(item.due);
   const inputs = {
     done: $('input', { type: 'checkbox', checked: !!item.done }),
     title: $('input', { value: item.title ?? '' }),
     kind: $('select', {}, ...KINDS.map((k) => $('option', { value: k, textContent: k, selected: k === item.kind }))),
-    due: $('input', { type: 'datetime-local', value: localInput(item.due) }),
+    date: $('input', { type: 'date', value: date }),
+    time: $('input', { type: 'time', value: time }),
     weight: $('input', { type: 'number', step: 'any', value: item.weight ?? '' }),
     mark: $('input', { type: 'number', step: 'any', value: item.mark ?? '' }),
     out_of: $('input', { type: 'number', step: 'any', value: item.out_of ?? '' }),
   };
   const orig = Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, raw(i)]));
-  const tr = $('tr', {}, $('td', {}, inputs.done), $('td', {}, inputs.kind), $('td', { className: 'course', textContent: courseOf(item) }),
-    $('td', {}, inputs.title), $('td', {}, inputs.due), $('td', { textContent: left(item) }), $('td', {}, inputs.weight),
-    $('td', {}, inputs.mark, ' / ', inputs.out_of),
-    $('td', { className: 'src', textContent: item.source + (item.missing ? ' · missing from source' : '') }),
-    $('td', {}, $('button', { textContent: 'Save', onclick: () => save(item, inputs, orig) }),
-      ...(item.source === 'manual' ? [$('button', { textContent: 'Delete', onclick: () => remove(item) })] : [])));
+  for (const [k, v] of Object.entries(pending.get(item.id)?.raw ?? {})) inputs[k][k === 'done' ? 'checked' : 'value'] = v;
+  const trash = $('button', { className: 'icon', title: `Delete ${item.title ?? ''}`, onclick: () => remove(item) }, icon(TRASH));
+  trash.setAttribute('aria-label', trash.title);
+  const tr = $('tr', { title: `From ${item.source}${item.missing ? ', missing from source' : ''}` },
+    $('td', {}, inputs.done), $('td', {}, inputs.kind), $('td', { className: 'course', textContent: courseOf(item) }),
+    $('td', {}, inputs.title), $('td', {}, $('div', { className: 'pair' }, inputs.date, inputs.time)),
+    $('td', { textContent: left(item) }), $('td', {}, inputs.weight),
+    $('td', {}, $('div', { className: 'pair' }, inputs.mark, '/', inputs.out_of)),
+    $('td', {}, ...(item.source === 'manual' ? [trash] : [])));
+  const track = () => { // record this row's changes for the one Save button
+    const changed = Object.keys(inputs).filter((k) => raw(inputs[k]) !== orig[k]);
+    const fields = Object.fromEntries(changed.filter((k) => k !== 'date' && k !== 'time').map((k) => [k, parsed(inputs[k])]));
+    if (changed.includes('date') || changed.includes('time')) fields.due = joinDue(inputs.date.value, inputs.time.value);
+    if (changed.length) pending.set(item.id, { raw: Object.fromEntries(changed.map((k) => [k, raw(inputs[k])])), fields });
+    else pending.delete(item.id);
+    tr.classList.toggle('changed', changed.length > 0);
+    saveState();
+  };
+  for (const input of Object.values(inputs)) input.addEventListener('input', track);
+  tr.classList.toggle('changed', pending.has(item.id));
   tr.classList.toggle('overdue', overdue(item));
   tr.classList.toggle('upcoming', upcoming(item));
   tr.classList.toggle('missing', !!item.missing);
@@ -304,6 +338,8 @@ function calendar(items, colorOf) {
 
 function render() {
   document.getElementById('add').hidden = !editing();
+  document.getElementById('save').hidden = !editing();
+  saveState();
   // Mode switch: pencil + Edit in view mode, page + View in edit mode
   document.getElementById('edit').replaceChildren(icon(editing() ? PAGE : PENCIL), editing() ? 'View' : 'Edit');
   // AC30: one banner per source that needs attention; the other sources still render below.
@@ -321,8 +357,10 @@ function render() {
   const visible = all.filter((c) => !hidden.includes(c));
   const courses = editing() ? all : visible; // edit mode lists hidden courses too, so they can be shown again
   if (!courses.includes(course)) course = '';
-  document.getElementById('known-courses').replaceChildren(
-    ...all.filter((c) => c !== '(no course)').map((c) => $('option', { value: c })));
+  const addCourse = document.querySelector('#add [name=course]');
+  const was = addCourse.value;
+  addCourse.replaceChildren($('option', { value: '', textContent: 'Course' }),
+    ...all.filter((c) => c !== '(no course)').map((c) => $('option', { value: c, textContent: c, selected: c === was })));
   const colorOf = (c) => `hsl(${(all.indexOf(c) * 137) % 360} 55% 38%)`; // AC26: page-derived course color; hiding keeps colours
 
   document.getElementById('courses').replaceChildren(...chips(courses, course, (v) => { course = v; }).map((b, n) => {
@@ -353,14 +391,13 @@ function render() {
   summary.textContent = [course, ...(g.grade == null ? [] : [`${g.grade.toFixed(1)}%`]), `${(g.graded_pct || 0).toFixed(0)}% Graded`,
     ...(g.approximate ? ['approximate'] : []), ...(g.info || []).map((i) => `${i.name}: ${i.value}`)].join(' | '); // AC29/AC91
 
-  const cols = ['done', 'type', 'course', 'title', 'due', 'left', 'weight', 'mark', ...(editing() ? ['source', 'actions'] : [])];
+  const cols = ['done', 'type', 'course', 'title', 'due', 'left', 'weight', 'mark', ...(editing() ? ['actions'] : [])];
   document.getElementById('items').classList.toggle('editing', editing());
-  document.getElementById('layout').classList.toggle('editing', editing());
   document.getElementById('cols').replaceChildren(...cols.map((c) => $('col', { className: c })));
   const done = $('th', { textContent: '✓', title: 'Done' });
   done.setAttribute('aria-label', 'Done');
   document.getElementById('head').replaceChildren($('tr', {}, done, ...['Type', 'Course', 'Title', 'Due', 'Time left', 'Weight', 'Mark',
-    ...(editing() ? ['Source', ''] : [])].map((h) => $('th', { textContent: h }))));
+    ...(editing() ? [''] : [])].map((h) => $('th', { textContent: h }))));
   document.getElementById('list').replaceChildren(...data.items
     .filter((i) => courses.includes(courseOf(i)) && picked(courseOf(i)) && keep(i))
     .sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b)) // not done first, then by due date
@@ -380,7 +417,13 @@ function render() {
 const daysInput = document.getElementById('days');
 daysInput.value = days();
 daysInput.addEventListener('change', () => { localStorage.setItem('upcomingDays', daysInput.value); render(); });
-document.getElementById('edit').addEventListener('click', () => { localStorage.setItem('editMode', editing() ? '0' : '1'); render(); });
+document.getElementById('edit').addEventListener('click', () => {
+  if (editing() && pending.size && !confirm(`Discard ${pending.size} unsaved change(s)?`)) return;
+  pending.clear();
+  localStorage.setItem('editMode', editing() ? '0' : '1');
+  render();
+});
+document.getElementById('save').addEventListener('click', saveAll);
 document.querySelector('#add [name=kind]').append(...KINDS.map((k) => $('option', { value: k, textContent: k })));
 document.getElementById('add').addEventListener('submit', add);
 document.getElementById('cal-back').addEventListener('click', () => { calOffset -= days(); render(); });

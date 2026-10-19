@@ -1901,7 +1901,7 @@ def test_index_manual_items():
     for a in adds + dels:
         assert re.search(r"method\s*:\s*['\"]POST['\"]", a) and "application/json" in a, a[:160]
     assert re.search(r"source\s*===\s*['\"]manual['\"]", html), "delete not limited to manual rows"
-    assert "Add item" in html and "datetime-local" in html and "innerHTML" not in html
+    assert "Add item" in html and 'type="date"' in html and 'type="time"' in html and "innerHTML" not in html
 
 
 # Quick (view/edit mode) — view mode by default, remembered in localStorage only; the add form and
@@ -1926,7 +1926,7 @@ def test_index_calendar():
     assert "days()" in cal, "calendar length is not the upcoming window N"
     assert re.search(r"calOffset\s*-=\s*days\(\)", html) and re.search(r"calOffset\s*\+=\s*days\(\)", html), "arrows do not move by N days"
     assert re.search(r"calOffset\s*=\s*0\b", html), "Today button does not reset the calendar"
-    assert re.search(r"editing\(\)\s*\?\s*\[\s*'Source'", html), "Source column is not edit-mode only"
+    assert "'Source'" not in html and "title: `From ${item.source}" in html, "source is not a row tooltip in edit mode"
 
 
 def test_index_hide_courses():
@@ -1977,6 +1977,19 @@ console.log(JSON.stringify(out));"""
     got = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
     assert got == [[], ["20 Oct", "09:05"], ["03 Jan 2027", "23:59"]], got
     assert "grid-template-columns: var(--date-w, max-content)" in html and "div.due {" in html and "--date-w" in html, "due dots not aligned"
+
+
+def test_index_single_save():
+    html = (ROOT / "index.html").read_text()
+    row = re.search(r"function row\(item\)\s*\{(.*?)\n\}", html, re.S)[1]
+    assert "textContent: 'Save'" not in row and "textContent: 'Delete'" not in row, "per-row Save or Delete button left"
+    assert re.search(r'<aside id="filters">\s*<button id="save">', html), "no single Save button at the top of the sidebar"
+    assert re.search(r"for \(const \[id, p\] of pending\)", html), "Save does not send every pending row"
+    assert "icon(TRASH)" in row, "delete is not a trash icon"
+    assert re.search(r'<aside id="filters">.*?<form id="add">.*?</aside>', html, re.S), "add-item form is not in the sidebar"
+    assert re.search(r'<select name="course" required', html), "add-item course is not a select"
+    assert "appearance: textfield" in html, "number inputs still show increment buttons"
+    assert "#layout.editing" not in html, "edit mode has its own layout"
 
 
 if __name__ == "__main__":
