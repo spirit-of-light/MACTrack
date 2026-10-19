@@ -1956,7 +1956,10 @@ def test_index_single_list():
     assert "#cal-wrap.pinned { position: sticky;" in html and "classList.toggle('pinned', days() <= 14)" in html, \
         "calendar does not stay in view only while N <= 14"
     assert re.search(r"#items thead th \{ position: sticky; top: var\(--head-top", html), "column titles do not follow scrolling"
-    assert re.search(r'<nav id="cal-nav">(?:(?!</nav>).)*id="days"', html, re.S), "upcoming window not beside the calendar arrows"
+    assert re.search(r'<nav id="cal-nav">(?:(?!</nav>).)*id="windows"', html, re.S), "upcoming window not beside the calendar arrows"
+    assert "const WINDOWS = [7, 14, 30];" in html and 'id="days"' not in html, "upcoming window is not 7 / 14 / 30 buttons"
+    assert "from.getDay() === 0 || from.getDay() === 6" in html and ".day.weekend { background: var(--weekend-bg); }" in html, \
+        "weekend days not grey"
     assert ".sort((a, b) => !!a.done - !!b.done || dueMs(a) - dueMs(b))" in html, "done items not listed after open ones"
     assert re.search(r"<th>Website</th><th>Status</th><th>Last synced</th>", html), "no sync status table"
     assert html.index('id="sources"') > html.index("</main>"), "sync table is not below the item list"

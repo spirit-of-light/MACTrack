@@ -8,6 +8,7 @@
     --primary: #7A013C; --primary-hover: #5E012E; --primary-tint: #F6E6EE; --on-primary: #FFFFFF;
     --bg: #FFFFFF; --surface: #FAFAFA; --text: #222222; --text-muted: #666666; --text-faint: #888888; --border: #EEEEEE;
     --overdue-bg: #FBD5D5; --upcoming-bg: #FFF3C4; --banner-bg: #FDE2E1; --banner-border: #E0A3A0;
+    --weekend-bg: #F2F2F2;
   }
   html { overscroll-behavior: none; } /* no rubber-band bounce past the top or bottom (macOS) */
   body { font: 14px system-ui, sans-serif; margin: 1.5rem; color: var(--text); background: var(--bg); }
@@ -46,10 +47,10 @@
   @media (max-width: 900px) { #layout { grid-template-columns: 1fr; } #filters { position: static; order: -1; max-height: none; } }
   .chips > span { display: flex; }
   .chips > span > button:first-child { flex: 1; }
-  .chips button { background: var(--bg); color: var(--text); border: 1px solid var(--text-faint);
+  .chips button, #windows button { background: var(--bg); color: var(--text); border: 1px solid var(--text-faint);
     border-left: 4px solid var(--c, var(--text-faint)); }
-  .chips button:hover { background: var(--primary-tint); }
-  .chips button[aria-pressed=true] { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+  .chips button:hover, #windows button:hover { background: var(--primary-tint); }
+  .chips button[aria-pressed=true], #windows button[aria-pressed=true] { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
   .chips .off { opacity: .5; }
   td.course { color: var(--c); font-weight: 600; white-space: nowrap; }
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
@@ -75,7 +76,7 @@
   tr.hl { background: var(--primary-tint); box-shadow: inset 3px 0 var(--primary); } /* due on the hovered calendar day */
   .info { color: var(--text-muted); margin: 0 0 .3rem; }
   #cal-nav { display: flex; align-items: center; gap: .3rem; padding: 1rem 0 .4rem; margin: 0; }
-  #cal-nav label { margin-left: .8rem; }
+  #windows { display: inline-flex; gap: .3rem; margin-left: .8rem; }
   /* 7 equal columns whatever N is; more days wrap to new rows; every row as tall as the tallest */
   #calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: 1fr;
     border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
@@ -83,6 +84,7 @@
     min-height: 5rem; overflow-wrap: anywhere; }
   .day h3 { font-size: .9rem; margin: 0 0 .3rem; }
   .day.today h3 { color: var(--primary); }
+  .day.weekend { background: var(--weekend-bg); }
   .day p { margin: 0 0 .3rem; border-left: 4px solid var(--c); padding-left: .3rem; font-size: .9em; }
   .chips button.eye, .chips button.eye:hover { background: none; color: var(--c); border: 0; padding: 0 .2rem; vertical-align: middle; }
   tr.off { opacity: .5; }
@@ -96,7 +98,7 @@
       <button id="cal-back" aria-label="Previous days">←</button>
       <button id="cal-today">Today</button>
       <button id="cal-fwd" aria-label="Next days">→</button>
-      <label>Upcoming window (days) <input id="days" type="number" min="1" style="width:4em"></label>
+      <span id="windows" role="group" aria-label="Upcoming window"></span>
     </nav>
     <div id="calendar"></div>
   </div>
@@ -139,7 +141,11 @@ const LOGIN = {
 const KINDS = ['exam', 'midterm', 'test', 'quiz', 'lab', 'assignment', 'homework', 'other']; // practice is not tracked
 const TYPE_BUTTONS = KINDS.filter((k) => k !== 'midterm' && k !== 'homework'); // still stored and editable, just no filter button
 const $ = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
-const days = () => Number(localStorage.getItem('upcomingDays')) || 7; // AC41/AC42/AC51: browser only
+const WINDOWS = [7, 14, 30]; // upcoming window choices, in days
+const days = () => { // AC41/AC42/AC51: browser only; anything else saved earlier falls back to 7
+  const n = Number(localStorage.getItem('upcomingDays')) || 7;
+  return WINDOWS.includes(n) ? n : 7;
+};
 const round2 = (v) => (v == null ? '' : Math.round(v * 100) / 100); // display only; edit mode keeps the exact value
 const editing = () => localStorage.getItem('editMode') === '1'; // view mode by default; browser only
 const hiddenCourses = () => { try { return JSON.parse(localStorage.getItem('hiddenCourses')) || []; } catch { return []; } }; // browser only
@@ -332,7 +338,8 @@ function calendar(items, colorOf) {
     const day = localInput(from.toISOString())[0];
     const hl = (on) => document.querySelectorAll(`#list tr[data-day="${day}"]`).forEach((tr) => tr.classList.toggle('hl', on));
     const label = from.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-    return $('div', { className: today ? 'day today' : 'day', onmouseenter: () => hl(true), onmouseleave: () => hl(false) },
+    const weekend = from.getDay() === 0 || from.getDay() === 6;
+    return $('div', { className: ['day', ...(today ? ['today'] : []), ...(weekend ? ['weekend'] : [])].join(' '), onmouseenter: () => hl(true), onmouseleave: () => hl(false) },
       $('h3', { textContent: today ? `${label} (today)` : label }),
       ...items.filter((i) => dueMs(i) >= from && dueMs(i) < to).sort((a, b) => dueMs(a) - dueMs(b)).map((i) => {
         const c = i.course ?? '(no course)';
@@ -347,6 +354,11 @@ function render() {
   document.getElementById('add').hidden = !editing();
   document.getElementById('save').hidden = !editing();
   saveState();
+  document.getElementById('windows').replaceChildren(...WINDOWS.map((n) => {
+    const b = $('button', { textContent: `${n} days`, onclick: () => { localStorage.setItem('upcomingDays', n); render(); } });
+    b.setAttribute('aria-pressed', String(n === days()));
+    return b;
+  }));
   // Mode switch: pencil + Edit in view mode, page + View in edit mode
   document.getElementById('edit').replaceChildren(icon(editing() ? PAGE : PENCIL), editing() ? 'View' : 'Edit');
   // AC30: one banner per source that needs attention; the other sources still render below.
@@ -431,9 +443,6 @@ function pin() {
 }
 window.addEventListener('resize', pin);
 
-const daysInput = document.getElementById('days');
-daysInput.value = days();
-daysInput.addEventListener('change', () => { localStorage.setItem('upcomingDays', daysInput.value); render(); });
 document.getElementById('edit').addEventListener('click', () => {
   if (editing() && pending.size && !confirm(`Discard ${pending.size} unsaved change(s)?`)) return;
   pending.clear();
