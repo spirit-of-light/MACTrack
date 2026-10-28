@@ -31,7 +31,7 @@ async function optional(url, empty) {
     return await json(url);
   } catch (e) {
     if (e instanceof LoginNeeded) throw e;
-    console.warn(`MacTracker: skipped ${url}: ${e.message}`);
+    console.warn(`MACTrack: skipped ${url}: ${e.message}`);
     return empty;
   }
 }
@@ -59,7 +59,7 @@ async function post(path, body, ctype = 'application/json') {
   });
   if (r.ok) return { ok: true, status: r.status, text: '' };
   const text = await r.text();
-  console.error(`MacTracker: POST ${path} rejected: ${r.status} ${text}`);
+  console.error(`MACTrack: POST ${path} rejected: ${r.status} ${text}`);
   return { ok: false, status: r.status, text };
 }
 
@@ -125,14 +125,14 @@ async function outline(tocTopics, code) {
     const sent = (ext ? ext[1] : (r.headers.get('Content-Type') || '')).toLowerCase();
     const ctype = /pdf/.test(sent) ? 'application/pdf'
       : /docx|wordprocessingml/.test(sent) ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : null;
-    if (!ctype) return console.warn(`MacTracker: outline is not a PDF or DOCX for ${code}, skipped`);
+    if (!ctype) return console.warn(`MACTrack: outline is not a PDF or DOCX for ${code}, skipped`);
     await post(`/api/outline?course=${encodeURIComponent(code)}`, await r.arrayBuffer(), ctype);
   } else if (/type=lti/i.test(topic.Url)) {
     await post('/api/outline', { course: code, categories: await syllabusCategories(topic.Url) });
   } else if (ssCode(topic.Url)) {
     syllabusDocs.push({ course: code, code: ssCode(topic.Url) }); // read after syncAll (readSyllabusDocs)
   } else {
-    console.warn(`MacTracker: outline topic for ${code} is an unsupported ${topic.TypeIdentifier}, skipped`);
+    console.warn(`MACTrack: outline topic for ${code} is an unsupported ${topic.TypeIdentifier}, skipped`);
   }
 }
 
@@ -165,10 +165,10 @@ async function avenue() {
     try {
       tocTopics = topics((await json(`${AVENUE}/d2l/api/le/1.75/${c.OrgUnitId}/content/toc`)).Modules);
     } catch (e) {
-      console.error(`MacTracker: content for ${c.Code}:`, e);
+      console.error(`MACTrack: content for ${c.Code}:`, e);
     }
     cmEntry = cmEntry || crowdmarkEntry(tocTopics); // spec 0002 AC24: first hit wins
-    await outline(tocTopics, c.Code).catch((e) => console.error(`MacTracker: outline for ${c.Code}:`, e));
+    await outline(tocTopics, c.Code).catch((e) => console.error(`MACTrack: outline for ${c.Code}:`, e));
   }
   if (cmEntry) await browser.storage.session.set({ crowdmarkEntry: cmEntry });
   return { items, categoryMarks, courseInfo };
@@ -206,10 +206,10 @@ async function childsmath() {
       await get(`${base}/announce.php`)
         .then(async (r) => [...doc(await r.text()).querySelectorAll('a[href]')].map((a) => a.href))
         .then((hrefs) => ssDocCodes(hrefs).forEach((code) => syllabusDocs.push({ course: label, code })))
-        .catch((e) => console.warn(`MacTracker: childsmath ${area} announcements: ${e.message}`));
+        .catch((e) => console.warn(`MACTrack: childsmath ${area} announcements: ${e.message}`));
     } catch (e) {
       if (e instanceof LoginNeeded) throw e;
-      console.warn(`MacTracker: skipped childsmath ${area}: ${e.message}`);
+      console.warn(`MACTrack: skipped childsmath ${area}: ${e.message}`);
     }
   }
   if (!read) throw new Error('no childsmath course area could be read');
@@ -224,7 +224,7 @@ async function sync() {
     if (body.status === 'login needed') needed.push(body.source);
     return ingest(body);
   });
-  for (const r of results) if (r.status === 'rejected') console.error('MacTracker: sync post failed:', r.reason);
+  for (const r of results) if (r.status === 'rejected') console.error('MACTrack: sync post failed:', r.reason);
   await readSyllabusDocs();
   if (!needed.length) return;
   await renewalReady;
@@ -241,7 +241,7 @@ async function readSyllabusDocs() {
     try {
       await post('/api/outline', { course: d.course, categories: await docCategories(d.code) });
     } catch (e) {
-      console.warn(`MacTracker: Simple Syllabus outline for ${d.course}: ${e.message}`);
+      console.warn(`MACTrack: Simple Syllabus outline for ${d.course}: ${e.message}`);
     }
   }
 }
@@ -307,7 +307,7 @@ const RENEW = {
   rerun,
   // AC10/AC11: one notification per sync, replaced by the next; source names only (AC19).
   notify: (sources) => browser.notifications.create('mactracker-login', {
-    type: 'basic', title: 'MacTracker: sign-in needed', message: sources.join(', '),
+    type: 'basic', title: 'MACTrack: sign-in needed', message: sources.join(', '),
   }),
 };
 

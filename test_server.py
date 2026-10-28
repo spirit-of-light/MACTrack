@@ -1,4 +1,4 @@
-"""MacTracker acceptance checks. Run: .venv/bin/python test_server.py
+"""MACTrack acceptance checks. Run: .venv/bin/python test_server.py
 
 Plain `assert` functions named test_*; the runner below calls each one,
 prints `FAIL <name>: <exception>` per failure and exits 1 if any fail.

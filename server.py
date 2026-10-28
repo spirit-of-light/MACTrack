@@ -1,4 +1,4 @@
-"""MacTracker local server. Run: .venv/bin/python server.py"""
+"""MACTrack local server. Run: .venv/bin/python server.py"""
 import hmac
 import io
 import json
