@@ -5,3 +5,4 @@ __pycache__/
 web-ext-artifacts/
 .DS_Store
 .amo-upload-uuid
+ai-factory/
