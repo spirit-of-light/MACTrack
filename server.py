@@ -20,6 +20,8 @@ import pypdf
 
 HERE = Path(__file__).resolve().parent
 ADDR = ("127.0.0.1", 8000)
+# The one web origin allowed to read and edit through the page routes (MACTrack-web's default).
+FRONTEND = "http://127.0.0.1:8001"
 MAX_BODY = 20 * 1024 * 1024  # outline PDFs are the largest bodies
 MAX_PDF_PAGES = 50  # course outlines are a few pages; bounds pypdf work on untrusted bytes
 MAX_DOCX_XML = 10 * 1024 * 1024  # uncompressed word/document.xml cap: bounds zip-bomb work on untrusted bytes
@@ -538,15 +540,19 @@ def ensure_token(path):
 
 
 TOKEN_ROUTES = ("/api/ingest", "/api/outline")
+PAGE_ROUTE = re.compile(r"/api/(?:status|items(?:/\d+(?:/delete)?)?)")
 
 
 class Handler(BaseHTTPRequestHandler):
     cors = None  # origin echoed in Access-Control-Allow-Origin for this request, if any
 
     def cors_origin(self):
-        """The extension's origin on a token route, else None. The page and other sites never get CORS."""
+        """The extension's origin on a token route, the frontend's on a page route, else None."""
         origin = self.headers.get("Origin", "")
-        if origin.startswith("moz-extension://") and urlsplit(self.path).path in TOKEN_ROUTES:
+        path = urlsplit(self.path).path
+        if origin.startswith("moz-extension://") and path in TOKEN_ROUTES:
+            return origin
+        if origin == self.server.frontend and PAGE_ROUTE.fullmatch(path):
             return origin
         return None
 
@@ -557,16 +563,18 @@ class Handler(BaseHTTPRequestHandler):
         super().end_headers()
 
     def do_OPTIONS(self):
-        # Firefox preflights the extension's JSON/X-Token POSTs even with a host permission.
+        # Firefox preflights the extension's JSON/X-Token POSTs even with a host permission;
+        # browsers preflight the frontend's JSON POSTs.
         self.cors = None
         if not self.host_ok():
             return
         origin = self.cors_origin()
         if not origin:
             return self.send_error(501, "Unsupported method ('OPTIONS')")
+        page = origin == self.server.frontend
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Methods", "POST")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Token")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST" if page else "POST")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type" if page else "Content-Type, X-Token")
         self.send_header("Access-Control-Max-Age", "600")
         self.cors = origin
         self.end_headers()
@@ -611,9 +619,8 @@ class Handler(BaseHTTPRequestHandler):
         self.cors = None
         if not self.host_ok():
             return
+        self.cors = self.cors_origin()
         db = self.server.db
-        if self.path == "/":
-            return self.reply(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
         if self.path == "/api/items":
             return self.json(200, course_view(db))
         if self.path == "/api/status":
@@ -662,7 +669,7 @@ class Handler(BaseHTTPRequestHandler):
     def post_page(self, item_id, delete, data):
         """The page's routes: add (`/api/items`), override (`/<id>`), delete (`/<id>/delete`).
         No token: the page has none. CSRF guard = JSON content type (forces a CORS preflight,
-        which do_OPTIONS refuses for these routes: no Access-Control-* headers) + Host allowlist."""
+        which do_OPTIONS answers only for the configured frontend origin) + Host allowlist."""
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             return self.send_error(415, "Content-Type must be application/json")
         try:
@@ -688,15 +695,15 @@ class Server(ThreadingHTTPServer):
         socketserver.TCPServer.server_bind(self)
 
 
-def make_server(addr=ADDR, db=HERE / "tracker.db", token=HERE / "token.txt"):
+def make_server(addr=ADDR, db=HERE / "tracker.db", token=HERE / "token.txt", frontend=FRONTEND):
     """Create the schema and token, return an unstarted server. Tests pass port 0 and temp paths."""
     c = sqlite3.connect(db)
     c.executescript(SCHEMA)
     c.close()
     srv = Server(addr, Handler)
-    srv.db, srv.token = str(db), ensure_token(token)
+    srv.db, srv.token, srv.frontend = str(db), ensure_token(token), frontend
     return srv
 
 
 if __name__ == "__main__":
-    make_server().serve_forever()
+    make_server(frontend=os.environ.get("MACTRACK_FRONTEND", FRONTEND)).serve_forever()
